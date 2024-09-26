@@ -1,0 +1,1 @@
+# mids-capstone-fall2024-ai-art-tutor
