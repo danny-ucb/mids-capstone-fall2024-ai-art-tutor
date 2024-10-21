@@ -1,3 +1,14 @@
 streamlit==1.29.0
 streamlit-drawable-canvas
-openai==0.28
+openai
+langchain
+langchain-openai
+langgraph
+langchain-community
+wikipedia
+chromadb
+scrubadub
+scrubadub_address
+scrubadub_spacy
+scrubadub_stanford
+networkx<=3.2.1

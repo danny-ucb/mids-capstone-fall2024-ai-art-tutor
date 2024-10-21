@@ -5,12 +5,34 @@ import requests
 from PIL import Image
 import io
 import streamlit as st
+from io import BytesIO
+import base64
 
 # Set up OpenAI API key
 openai.api_key = "sk-xMls_bdlW2zesbQwEg1eM_VZII3XtTt9t4NCYOqTPxT3BlbkFJcgWtdu7E4cW1BAXm8KIav9XmjmTiTSSEC7aXl9GJQA"
 ## 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
 ## langchain api key = "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"
 # Define a function to get a response from GPT-4
+
+def login():
+    USERNAME = "abbyp"
+    PASSWORD = "capstone2024"
+    """A simple login page."""
+    st.title("Login")
+    
+    # Username input
+    username = st.text_input("Username")
+    
+    # Password input
+    password = st.text_input("Password", type="password")
+    
+    if st.button("Login"):
+        if username == USERNAME and password == PASSWORD:
+            st.session_state['logged_in'] = True
+            st.success("Successfully logged in!")
+        else:
+            st.error("Invalid username or password")
+
 def generate_response(prompt, image_url):
     try:
         # Use the OpenAI API to create chat completion
@@ -96,3 +118,12 @@ def inject_custom_css():
     )
 
 
+def encode_image(image):
+    # Convert the PIL image to bytes
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")  # or "JPEG" depending on your image type
+    img_bytes = buffered.getvalue()
+
+    # Encode the bytes as base64
+    base64_image = base64.b64encode(img_bytes).decode('utf-8')
+    return base64_image
