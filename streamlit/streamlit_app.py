@@ -1,124 +1,157 @@
 import openai
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
-from PIL import Image
-import pandas as pd
-from helpers import generate_response, inject_custom_css
+from PIL import Image as PilImage
 import os
- 
+from agent_helpers.api_keys import get_keys
+from agent_helpers.multi_agent import create_nodes, stream_messages
+from helpers import inject_custom_css
 
-
+# Initialize OpenAI key and create agent graph
+openai_key = get_keys()
 inject_custom_css()
+if 'graph' not in st.session_state:
+    st.session_state['graph'] = create_nodes(openai_key)
 
-# Title for the app
-st.title("🎨 AI ArtBuddy") 
-st.subheader("Let's Draw!") 
+# App title and description
+st.title("🎨 AI ArtBuddy")
+st.subheader("Let's Draw!")
+st.write("Ask me anything about art and drawing! I'm here to help you learn and have fun. 😊")
 
-st.write("Ask me anything about art and drawing! I’m here to help you learn and have fun. 😊")
-
+# Initialize session state variables
 if 'messages' not in st.session_state:
-    st.session_state['messages'] = [
-        {"role": "system", "content": "You are a helpful assistant for 6 to 8 year old kids interested in drawing and art."}
-    ]
-
+    st.session_state['messages'] = []
+if 'current_image' not in st.session_state:
+    st.session_state['current_image'] = None
 if 'chat_active' not in st.session_state:
-    st.session_state['chat_active'] = False  # Track if chat is active    
+    st.session_state['chat_active'] = False
 
-test_image_url = "https://media.npr.org/assets/img/2014/12/05/family-drawing-examples-together_wide-ea9ec863740594906c9e520cd05e29da72b54887.jpg?s=1400&c=100&f=jpeg"
-# Sidebar options
-st.sidebar.header("Choose Input Method")
-option = st.sidebar.radio("Select an option:", ("Upload Image", "Draw"))
+# File uploader for image input
+uploaded_image = st.file_uploader("Upload your artwork (optional):", type=["png", "jpg", "jpeg"])
 
-if option == "Upload Image":
-    # Upload an image file
-    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+# Handle image upload
+if uploaded_image is not None:
+    # Save image and update session state
+    save_dir = "uploaded_images"
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
     
-    if uploaded_file is not None:
-        # Open and display the image using PIL
-        img = Image.open(uploaded_file)
-        st.image(img, caption='Uploaded Image', use_column_width=True)
-
-elif option == "Draw":
-    # Canvas settings
-    stroke_width = st.sidebar.slider("Stroke width: ", 1, 25, 3)
-    stroke_color = st.sidebar.color_picker("Stroke color: ", "#000000")
-    bg_color = st.sidebar.color_picker("Background color: ", "#ffffff")
-    drawing_mode = st.sidebar.selectbox(
-        "Drawing mode:", ("freedraw", "rect", "circle", "transform")
-    )
+    save_path = os.path.join(save_dir, uploaded_image.name)
+    with open(save_path, "wb") as f:
+        f.write(uploaded_image.getbuffer())
     
-    # Canvas to draw on
-    canvas_result = st_canvas(
-        stroke_width=stroke_width,
-        stroke_color=stroke_color,
-        background_color=bg_color,
-        height=400,
-        width=600,
-        drawing_mode=drawing_mode,
-        key="canvas",
-    )
-    
-    # If a drawing is made, save it
-    if canvas_result.image_data is not None:
-        st.image(canvas_result.image_data, caption='Your Drawing')
-            # Convert NumPy array to PIL image
-        img = Image.fromarray(canvas_result.image_data)
+    st.session_state['current_image'] = save_path
+    st.image(uploaded_image, caption="Your uploaded artwork", use_column_width=True)
 
+# Start Chat button
+if not st.session_state['chat_active']:
+    if st.button("💬 Start Chat!"):
+        st.session_state['chat_active'] = True
+        st.experimental_rerun()
 
-
-# Footer
-st.sidebar.markdown("### Select an image or draw on the canvas.")
-# chat_button = """
-#     <a href="#" class="chat-button">💬 Chat Now!</a>
-# """
-# st.markdown(chat_button, unsafe_allow_html=True)
-if st.button("💬 Chat Now!"):
-    st.session_state['chat_active'] = True  # Set chat state to active
-
+# Chat interface
 if st.session_state['chat_active']:
-    st.write("**Chat History**")
-    for message in st.session_state['messages']:
-        if message['role'] == 'user':
-            st.write(f"**You:** {message['content']}")
-        elif message['role'] == 'assistant':    
-            st.write(f"**AI ArtBuddy:** {message['content']}")
-
-    user_input = st.text_input("You:", "", placeholder="Type something...")
-
-    # Send button
-    if st.button("Send"):
-        if user_input:
-    #        Append the user's message to the session state
-            st.session_state['messages'].append({"role": "user", "content": user_input})
-
-            # Generate a response from the AI based on the conversation history
-            ai_response = generate_response(user_input, test_image_url) 
-
-            # # Append the AI's response to the session state
-            st.session_state['messages'].append({"role": "assistant", "content": ai_response})
-
-            # # Refresh the chat history after sending the message
-            st.experimental_rerun()
+    # Create a container for the chat
+    chat_container = st.container()
+    
+    with chat_container:
+        # Display chat history
+        for msg in st.session_state['messages']:
+            if isinstance(msg, dict):
+                role = msg.get('role', '')
+                content = msg.get('content', '')
+                
+                # Handle different types of content
+                if isinstance(content, dict):
+                    # Extract content from AIMessage if present
+                    for node_key in ['conversation_moderator_node', 'image_moderator_node']:
+                        if node_key in content:
+                            messages = content[node_key].get('messages', [])
+                            if messages and hasattr(messages[0], 'content'):
+                                content = messages[0].content
+                                break
+                
+                # Display the message
+                if role == 'user':
+                    st.write(f'👤 **You:** {content}')
+                elif role == 'assistant':
+                    st.write(f'🎨 **ArtBuddy:** {content}')
         
-# Button to clear the conversation
-if st.button("Clear Conversation"):
-    st.session_state['messages'] = [
-        {"role": "system", "content": "You are a helpful assistant for kids interested in drawing and art."}
-    ]
-    st.session_state['chat_active'] = False  # Reset chat state
-    st.experimental_rerun()
+        # Chat input
+        user_input = st.text_input("Type your message here:", key="user_input")
+        col1, col2 = st.columns([1, 4])
+        
+        # Send button
+        with col1:
+            send_pressed = st.button("Send", key="send_button")
+        
+        # Clear chat button
+        with col2:
+            clear_pressed = st.button("Clear Chat")
+        
+        if send_pressed and user_input:
+            # Add user message to history
+            st.session_state['messages'].append({
+                "role": "user",
+                "content": user_input
+            })
+            
+            # Get AI response
+            thread_config = {"configurable": {"user_id": "1", "thread_id": "1"}}
+            
+            try:
+                if st.session_state['current_image']:
+                    response = stream_messages(
+                        st.session_state['graph'],
+                        text=user_input,
+                        thread=thread_config,
+                        image_path=st.session_state['current_image']
+                    )
+                else:
+                    response = stream_messages(
+                        st.session_state['graph'],
+                        text=user_input,
+                        thread=thread_config
+                    )
+                
+                # Extract the message content
+                content = None
+                if isinstance(response, dict):
+                    for node_key in ['conversation_moderator_node', 'image_moderator_node']:
+                        if node_key in response:
+                            messages = response[node_key].get('messages', [])
+                            if messages and hasattr(messages[0], 'content'):
+                                content = messages[0].content
+                                break
+                
+                if content:
+                    st.session_state['messages'].append({
+                        "role": "assistant",
+                        "content": content
+                    })
+                
+            except Exception as e:
+                st.error(f"An error occurred: {str(e)}")
+            
+            # Clear the input
+            # st.session_state['user_input'] = ""
+            # st.experimental_rerun()
+        
+        if clear_pressed:
+            st.session_state['messages'] = []
+            st.experimental_rerun()
 
-# # When user submits input, generate a response from GPT-4
-# if chat_button:
-#     response = ""
-#     if user_input:
-#         if option == "Draw":
-#             if canvas_result.image_data is not None:
-#         # Call the function to get a response from GPT-4
-#                 response = generate_response(user_input, image_url = "https://media.npr.org/assets/img/2014/12/05/family-drawing-examples-together_wide-ea9ec863740594906c9e520cd05e29da72b54887.jpg?s=1400&c=100&f=jpeg")
-#         if option == "Upload Image":
-#             if uploaded_file is not None:
-#                 response = generate_response(user_input, image_url = "https://media.npr.org/assets/img/2014/12/05/family-drawing-examples-together_wide-ea9ec863740594906c9e520cd05e29da72b54887.jpg?s=1400&c=100&f=jpeg")
-
-# st.write(f"AI ArtBuddy: {response}")
+        # Download chat history button
+        if st.session_state['messages']:
+            chat_text = "\n".join([
+                f"{'You' if msg.get('role') == 'user' else 'ArtBuddy'}: {msg.get('content', '')}"
+                for msg in st.session_state['messages']
+                if isinstance(msg, dict)
+            ])
+            st.download_button(
+                label="Download Chat History",
+                data=chat_text,
+                file_name="art_buddy_chat.txt",
+                mime="text/plain"
+            )
 
