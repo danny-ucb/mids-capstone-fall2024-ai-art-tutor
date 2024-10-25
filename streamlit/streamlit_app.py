@@ -3,9 +3,9 @@ import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image as PilImage
 import os
-from agent_helpers.api_keys import get_keys
-from agent_helpers.multi_agent import *
-from helpers import inject_custom_css
+from helpers.api_keys import get_keys
+from helpers.multi_agent import *
+from app_pages.helpers import inject_custom_css
 from app_pages.parental_controls import * 
 from app_pages.login_registration_page import * 
 
