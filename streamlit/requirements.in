@@ -1,4 +1,6 @@
 streamlit==1.29.0
+boto3
+botocore
 streamlit-drawable-canvas
 openai
 langchain
@@ -8,5 +10,4 @@ langchain-community
 chromadb
 scrubadub
 scrubadub_address
-scrubadub_spacy
-wikipedia
+urllib3
