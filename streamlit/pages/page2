@@ -1,4 +1,0 @@
-import streamlit as st
-
-st.title("Parental Controls")
-st.write("Welcome Parents!")

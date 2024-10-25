@@ -6,7 +6,8 @@ import os
 from agent_helpers.api_keys import get_keys
 from agent_helpers.multi_agent import *
 from helpers import inject_custom_css
-from parental_controls import * 
+from app_pages.parental_controls import * 
+from app_pages.login_registration_page import * 
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -190,9 +191,10 @@ if st.session_state['logged_in']:
         parental_controls_page()
 
 else:
-    option = st.sidebar.selectbox("Choose an option", ["Login", "Register"])
-    
-    if option == "Register":
-        registration_page()
-    else:
+    login, registration = st.tabs(["Login", "Register"])
+    with login:
         login_page()
+    with registration:
+        registration_page()
+    
+        
