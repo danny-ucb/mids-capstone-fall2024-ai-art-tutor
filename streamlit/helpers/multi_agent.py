@@ -24,7 +24,8 @@ from IPython.display import Image, display
 from langchain.chat_models import ChatOpenAI
 import getpass
 import os
-
+import streamlit as st
+import base64
 
 
 
@@ -53,7 +54,7 @@ def create_agent(openai_key:str,
             MessagesPlaceholder(variable_name="agent_scratchpad")
         ]
     )
-    llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key = openai_key) 
+
     agent = create_openai_tools_agent(llm, tools, prompt)
     executor = AgentExecutor(agent=agent, tools=tools, return_intermediate_steps=True, verbose=True)
     return executor
@@ -145,11 +146,12 @@ def create_nodes(openai_key):
         ]
     ).partial(options=str(options), members=", ".join(members))
 
-    llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key = openai_key)
+    gpt_4o_llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key = openai_key)
+    gpt_35_turbo_llm = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key = openai_key)
 
     supervisor_chain = (
         prompt
-        | llm.bind_functions(functions=[function_def], function_call="route")
+        | gpt_4o_llm.bind_functions(functions=[function_def], function_call="route")
         | JsonOutputFunctionsParser()
     )
 
@@ -158,21 +160,21 @@ def create_nodes(openai_key):
     """
     Create Other Agent Nodes
     """
-    image_moderator = (
-        "You are tasked with determining if the image uploaded is appropriate for the application."
-        "Appropriate content includes children's drawings that do not include violence, explicit themes, or anything not suitable for an 8-10 year old"
-        "If the image is a photograph of something other than a child's drawing, it is not appropriate"
-        "Return True if the image is appropriate, and False if it is not"
-        "One word answers only. Invoke moderator_tool only once."
-    )
+    # image_moderator = (
+    #     "You are tasked with determining if the image uploaded is appropriate for the application."
+    #     "Appropriate content includes children's drawings that do not include violence, explicit themes, or anything not suitable for an 8-10 year old"
+    #     "If the image is a photograph of something other than a child's drawing, it is not appropriate"
+    #     "Return True if the image is appropriate, and False if it is not"
+    #     "One word answers only. Invoke moderator_tool only once."
+    # )
 
-    image_moderator_agent = create_agent(
-        openai_key, 
-        llm,
-        tools=[moderator_tool],
-        system_prompt=image_moderator
-    )
-    image_moderator_node = functools.partial(agent_node, agent=image_moderator_agent, name="image_moderator_agent")
+    # image_moderator_agent = create_agent(
+    #     openai_key, 
+    #     gpt_4o_llm,
+    #     tools=[moderator_tool],
+    #     system_prompt=image_moderator
+    # )
+    # image_moderator_node = functools.partial(agent_node, agent=image_moderator_agent, name="image_moderator_agent")
     
     
     conversation_moderator = (
@@ -187,14 +189,14 @@ def create_nodes(openai_key):
 
     conversation_moderator_agent = create_agent(
         openai_key, 
-        llm,
+        gpt_4o_llm,
         tools=[moderator_tool],
         system_prompt=conversation_moderator
     )
     conversation_moderator_node = functools.partial(agent_node, agent=conversation_moderator_agent, name="conversation_moderator_agent")
 
     
-    storyteller = create_agent(openai_key, llm,[check_story_completion],"Talk in a teacher's tone to 6-8 years old.\
+    storyteller = create_agent(openai_key, gpt_4o_llm,[check_story_completion],"Talk in a teacher's tone to 6-8 years old.\
     You help user complete a storyline. Use check_story_completion tool to check completion\
     Only finish when complete\
         Otherwise keep building storyline with user.\
@@ -202,7 +204,7 @@ def create_nodes(openai_key):
     storyteller_node = functools.partial(agent_node, agent=storyteller, name="storyteller")
 
     # visual_artist
-    visual_artist = create_agent(openai_key, llm,[generate_image],"You're a visual artist \
+    visual_artist = create_agent(openai_key, gpt_4o_llm,[generate_image],"You're a visual artist \
         You draw in a style that is similar to children's drawings from age 6 to 8, \
             Make the style as similar as possible to user's original drawings\
             Your primary job is to help users visualize ideas\
@@ -210,14 +212,14 @@ def create_nodes(openai_key):
     visual_artist_node = functools.partial(agent_node, agent=visual_artist, name="visual_artist")
 
     # critic
-    critic = create_agent(openai_key, llm,[wikipedia_tool],"You give feedback on user's artwork and how to improve.\
+    critic = create_agent(openai_key, gpt_4o_llm,[wikipedia_tool],"You give feedback on user's artwork and how to improve.\
         Talk in an encouraging teacher's tone to 6-8 years old, be consice for each user query \
             say no more than 3-4 sentences. Use wikipedia to look up information when users asked for \
                 detailed explanation of art concepts or theories")
     critic_node = functools.partial(agent_node, agent=critic, name="critic")
 
 
-    silly = create_agent(openai_key, llm, [moderator_tool], "You gently redirect the user back to the focus of learning art. \
+    silly = create_agent(openai_key, gpt_4o_llm, [moderator_tool], "You gently redirect the user back to the focus of learning art. \
     If the child is getting off track, for example, saying silly phrases, repeating words, typing the alphabet, or \
     talking about something unrelated to art, remind them that you are an art teacher. Talk in one or two sentences.")
 
@@ -225,7 +227,7 @@ def create_nodes(openai_key):
     
     multiagent = StateGraph(AgentState)
 
-    multiagent.add_node("image_moderator_node", image_moderator_node)
+    # multiagent.add_node("image_moderator_node", image_moderator_node)
     multiagent.add_node("conversation_moderator_node", conversation_moderator_node)
 
     multiagent.add_node("supervisor", supervisor_chain)
@@ -237,12 +239,11 @@ def create_nodes(openai_key):
     memory = MemorySaver()
 
     # Start conditions
-    multiagent.add_edge(START, "image_moderator_node")
+    # multiagent.add_edge(START, "image_moderator_node")
 
-    multiagent.add_edge("image_moderator_node", "supervisor")
-    #for member in ["storyteller","visual_artist"]:
-        # We want our workers to "report back" to the supervisor when done
-    #   workflow.add_edge(member, "supervisor")
+    # multiagent.add_edge("image_moderator_node", "supervisor")
+    multiagent.add_edge(START, "supervisor")
+
 
     # for supervisor to delegate
     conditional_map = {k: k for k in members} 
@@ -254,21 +255,27 @@ def create_nodes(openai_key):
     multiagent.add_edge("silly","conversation_moderator_node")
 
     # End conditions
-    multiagent.add_edge("conversation_moderator_node",END)
+    multiagent.add_edge("conversation_moderator_node", END)
 
     graph = multiagent.compile(checkpointer=memory)
     
     return graph 
 
-def stream_messages(graph, text: str, thread: dict, image_url: str= None):
+def encode_image(image_path):
+  with open(image_path, "rb") as image_file:
+    return base64.b64encode(image_file.read()).decode('utf-8')
+
+
+def stream_messages(graph, text: str, thread: dict, image_path: str= None):
     # Initialize the content with the text message
     content = [{"type": "text", "text": text}]
 
     # If image_url is provided, append the image content
-    if image_url:
+    if image_path:
+        base64_image = encode_image(image_path)
         content.append({
             "type": "image_url",
-            "image_url": {"url": image_url}
+            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
         })
 
     # Define the input for the graph stream
@@ -278,8 +285,88 @@ def stream_messages(graph, text: str, thread: dict, image_url: str= None):
         ]
     }
 
-    # Stream the graph and print the output
-    for s in graph.stream(input_data,config=thread):
+        # Initialize a variable to store the final output message
+    final_message = ""
+
+    # Stream the graph and capture only the final message output
+    for s in graph.stream(input_data, config=thread):
         if "__end__" not in s:
-            print(s)
-            print("----")
+            # Capture the most recent message (final one)
+            final_message = s
+            # st.write(final_message)
+            
+    # Display just the final message
+    if 'conversation_moderator_node' in final_message:
+        final_message_str = final_message['conversation_moderator_node']['messages'][0].content
+    else:
+        st.write("Warning! Wrong Node")
+        final_message_str = final_message
+    st.write(final_message_str)
+    return(final_message)
+
+def image_moderation(openai_key, image_path):
+    """
+    Moderates images to verify if they are children's drawings and appropriate for 8-10 year olds.
+    Returns True only for appropriate children's drawings, False otherwise.
+    
+    Args:
+        openai_key (str): OpenAI API key
+        image_path (str): Path to the image file
+        
+    Returns:
+        bool: True if image is an appropriate child's drawing, False otherwise
+    """
+    gpt_4o_llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=openai_key)
+    
+    # More specific system prompt for better accuracy
+    image_moderator = (
+        "You are an expert at identifying children's artwork. Your task is to:"
+        "\n1. Determine if the image is a drawing/sketch made by a child (ages 5-12)"
+        "\n2. If it is a child's drawing, verify it contains no inappropriate content (violence, explicit themes, etc)"
+        "\n3. Return 'True' ONLY if both conditions are met:"
+        "\n   - The image is clearly a child's drawing/sketch"
+        "\n   - The content is appropriate for children ages 8-10"
+        "\n4. Return 'False' for:"
+        "\n   - Any photographs"
+        "\n   - Adult artwork"
+        "\n   - Digital art"
+        "\n   - Inappropriate children's drawings"
+        "\nProvide only a one-word response: True or False"
+    )
+    
+    image_moderator_agent = create_agent(
+        openai_key,
+        gpt_4o_llm,
+        tools=[moderator_tool],
+        system_prompt=image_moderator
+    )
+    
+    base64_image = encode_image(image_path)
+    
+    # More detailed prompt for better context
+    input_messages = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "Analyze this image and determine if it is: "
+             "1) A drawing made by a child (not a photograph or adult artwork) AND "
+             "2) Contains appropriate content for children ages 8-10. "
+             "Answer True only if both conditions are met."},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}",
+                },
+            },
+        ]}
+    ]
+    
+    try:
+        response = image_moderator_agent.invoke({"messages": input_messages})
+        result = response['output'].lower().strip() == 'true'
+        return result
+    except Exception as e:
+        print(f"Error during image moderation: {str(e)}")
+        return False
+
+
+
+    
