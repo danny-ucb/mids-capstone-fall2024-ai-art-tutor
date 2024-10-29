@@ -28,18 +28,27 @@ def inject_custom_css():
             text-align: center;
             font-size: 3em;
         }
+        
+        /* Style for buttons */
         .stButton>button {
             background-color: #ffcccb;
             color: black;
-            border-radius: 10px;
+            border-radius: 15px;
             font-size: 1em;
-            padding: 10px 20px;
-        }
-        .stFileUploader>label {
-            color: #4682B4;
-            font-size: 1.0em;
+            padding: 15px;
+            width: 100%; /* Make buttons take full width of their container */
+            margin: 5px 0; /* Add some space between buttons */
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1); /* Add subtle shadow */
         }
 
+        /* Style for input box */
+        .stTextInput>div>input {
+            background-color: #F5F5F5;
+            border-radius: 10px;
+            padding: 10px;
+            width: 100%;
+        }
+        
         /* Sidebar styles */
         .sidebar .sidebar-content {
             background-color: #FFFACD; /* Light golden background */
@@ -63,7 +72,6 @@ def inject_custom_css():
         """,
         unsafe_allow_html=True,
     )
-
 
 def encode_image(image):
     # Convert the PIL image to bytes

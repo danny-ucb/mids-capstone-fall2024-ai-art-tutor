@@ -8,27 +8,48 @@ from helpers.multi_agent import *
 from app_pages.helpers import inject_custom_css
 from app_pages.parental_controls import * 
 from app_pages.login_registration_page import * 
+from datetime import datetime
+import pytz
+
+timezone = pytz.timezone("America/New_York")
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
-if st.session_state['logged_in']:
-    
-    # Initialize OpenAI key and create agent graph
+if not st.session_state['logged_in']:
+    intro_page()
+
+    # Button to proceed to login/registration
+    if st.button("Proceed to Login / Register"):
+        st.session_state['show_login_registration'] = True
+
+    # Check if the user chose to proceed to login/registration
+    if 'show_login_registration' in st.session_state and st.session_state['show_login_registration']:
+        # Display login and registration tabs
+        login, registration = st.tabs(["Login", "Register"])
+        with login:
+            login_page()
+        with registration:
+            registration_page()
+
+else:
+    # Main application for logged-in users
     openai_key = get_keys()
     inject_custom_css()
     
-    page = st.sidebar.selectbox("Select a page", ["Home", "Parental Controls"])
+    # page = st.sidebar.selectbox("Select a page", ["Home", "Parental Controls"])
+    main_page, parental_controls = st.tabs(["Home", "Parental Controls"])
+    
     if 'graph' not in st.session_state:
         st.session_state['graph'] = create_nodes(openai_key)
-    
-    if page == "Home":
+    with main_page:
+
         # App title and description
         st.title("🎨 AI ArtBuddy")
         st.subheader("Let's Draw!")
         st.write("Ask me anything about art and drawing! I'm here to help you learn and have fun. 😊")
         
-        # Initialize session state variables
+        # Initialize session state variables for chat
         if 'messages' not in st.session_state:
             st.session_state['messages'] = []
         if 'current_image' not in st.session_state:
@@ -51,8 +72,8 @@ if st.session_state['logged_in']:
                 f.write(uploaded_image.getbuffer())
             
             st.session_state['current_image'] = save_path
-            st.image(uploaded_image, caption="Your uploaded artwork", width = 200)
-            image_moderator_result = image_moderation(openai_key, image_path = save_path)
+            st.image(uploaded_image, caption="Your uploaded artwork", width=200)
+            image_moderator_result = image_moderation(openai_key, image_path=save_path)
         
         # Start Chat button
         if not st.session_state['chat_active']:
@@ -72,22 +93,18 @@ if st.session_state['logged_in']:
                     if isinstance(msg, dict):
                         role = msg.get('role', '')
                         content = msg.get('content', '')
-                        
-                        # Handle different types of content
-                        if isinstance(content, dict):
-                            # Extract content from AIMessage if present
-                            for node_key in ['conversation_moderator_node']:
-                                if node_key in content:
-                                    messages = content[node_key].get('messages', [])
-                                    if messages and hasattr(messages[0], 'content'):
-                                        content = messages[0].content
-                                        break
-                        
                         # Display the message
                         if role == 'user':
                             st.write(f'👤 **You:** {content}')
-                        elif role == 'assistant':
-                            st.write(f'🎨 **ArtBuddy:** {content}')
+                        elif role == 'assistant':   
+                            if content.startswith("https"):
+                                img_file_path = f"produced_images/AI_generated_image_{generate_random_string(10)}.png"
+                                download_image_requests(url=content, file_name=img_file_path)
+                                st.write(f'🎨 **ArtBuddy:** Here\'s what I drew for you:')
+                                st.image(img_file_path, width = 300) 
+                            else:
+                                st.write(f'🎨 **ArtBuddy:** {content}')
+
             
             # Create a spacer
             st.markdown("<br>", unsafe_allow_html=True)
@@ -95,11 +112,12 @@ if st.session_state['logged_in']:
             # Input area in the second container
             with input_container:
                 # Chat input
-                user_input = st.text_input("Type your message here:", key="user_input")
+                user_input = st.text_input("Type your message here:", key="user_input", value = "")
                 
                 # Buttons in columns
-                col1, col2, col3 = st.columns([1, 1, 4])
                 
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+                col = st.columns([1]) 
                 # Send button
                 with col1:
                     send_pressed = st.button("Send", key="send_button")
@@ -122,14 +140,20 @@ if st.session_state['logged_in']:
                             file_name="art_buddy_chat.txt",
                             mime="text/plain"
                         )
+
+                with col4:
+                    end_session_pressed = st.button("End Session")
+
                 
                 if send_pressed and user_input:
+                    
                     # Add user message to history
                     st.session_state['messages'].append({
                         "role": "user",
-                        "content": user_input
+                        "content": user_input, 
+                        "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
                     })
-                    
+
                     # Get AI response
                     thread_config = {"configurable": {"user_id": "1", "thread_id": "1"}}
                     
@@ -162,7 +186,7 @@ if st.session_state['logged_in']:
                         if response:
                             content = None
                             if isinstance(response, dict):
-                                for node_key in ['conversation_moderator_node']:
+                                for node_key in ['conversation_moderator_node', 'visual_artist']:
                                     if node_key in response:
                                         messages = response[node_key].get('messages', [])
                                         if messages and hasattr(messages[0], 'content'):
@@ -172,7 +196,8 @@ if st.session_state['logged_in']:
                             if content:
                                 st.session_state['messages'].append({
                                     "role": "assistant",
-                                    "content": content
+                                    "content": content, 
+                                    "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
                                 })
                         
                         # Rerun to update the chat display
@@ -184,17 +209,16 @@ if st.session_state['logged_in']:
                 if clear_pressed:
                     st.session_state['messages'] = []
                     st.experimental_rerun()
+
+                if end_session_pressed:
+                    save_session_summary()
+                    st.session_state['messages'] = []
+                    st.experimental_rerun()
+                    
+
     
-    elif page == "Parental Controls":
-        st.title("Parental Controls")
+    # elif page == "Parental Controls":
+    with parental_controls:
+        
         # Call the function to display the parental controls page
         parental_controls_page()
-
-else:
-    login, registration = st.tabs(["Login", "Register"])
-    with login:
-        login_page()
-    with registration:
-        registration_page()
-    
-        
