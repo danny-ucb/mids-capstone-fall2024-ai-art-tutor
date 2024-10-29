@@ -10,4 +10,7 @@ langchain-community
 chromadb
 scrubadub
 scrubadub_address
+scrubadub_stanford
+spacy>=3.7.2,<3.8.0
+scrubadub_spacy
 urllib3

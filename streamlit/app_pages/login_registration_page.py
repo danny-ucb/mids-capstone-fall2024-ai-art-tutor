@@ -17,6 +17,7 @@ def load_credentials():
     except FileNotFoundError:
         return {}
 
+
 def save_credentials(credentials):
     with open('credentials.json', 'w') as f:
         json.dump(credentials, f)
@@ -25,12 +26,17 @@ def save_credentials(credentials):
 def hash_password(password):
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
 
-def check_password(password, hashed):
-    return bcrypt.checkpw(password.encode(), hashed)
+# def check_password(password, hashed):
+#     return bcrypt.checkpw(password.encode(), hashed)
+
+def check_password(password, hashed_password):
+    return bcrypt.checkpw(password.encode('utf-8'), hashed_password)
 
 
 def registration_page():
+    inject_custom_css()
     st.title("Create an Account")
+    st.write("To create an account, you’ll need a parent’s permission. We require a parent’s email address to verify your account and get their consent for you to use our application.")
     
     # Initialize session state variables
     if 'verification_code' not in st.session_state:
@@ -40,7 +46,7 @@ def registration_page():
     
     # Form inputs
     username = st.text_input("Enter a Username")
-    email = st.text_input("Enter your Email")
+    email = st.text_input("Enter a Parent's Email")
     password = st.text_input("Enter a Password", type="password")
     confirm_password = st.text_input("Confirm Password", type="password")
     
@@ -56,6 +62,7 @@ def registration_page():
                     st.session_state.registration_step = 'verify'
                     st.session_state.temp_username = username
                     st.session_state.temp_password = password
+                    st.session_state.parent_email = email
                     
                     # Send verification email
                     try:
@@ -84,16 +91,15 @@ def registration_page():
                 if int(input_code) == st.session_state.verification_code:
                     credentials = load_credentials()
                     hashed_pw = hash_password(st.session_state.temp_password)
-                    credentials[st.session_state.temp_username] = hashed_pw.decode('utf-8')
+
+                    credentials[st.session_state.temp_username] = {
+                        "password": hashed_pw.decode('utf-8'),
+                        "parent_email": st.session_state.parent_email
+                    }
+
                     save_credentials(credentials)
                     st.success("Account created successfully! Please login.")
-                    
-                    # Reset the registration state
-                    # st.session_state.verification_code = None
-                    # st.session_state.registration_step = 'initial'
-                    # st.session_state.temp_username = None
-                    # st.session_state.temp_password = None
-                    # st.rerun()
+
                 else:
                     st.error("Verification code does not match!")
 
@@ -104,11 +110,13 @@ def registration_page():
             st.session_state.registration_step = 'initial'
             st.session_state.temp_username = None
             st.session_state.temp_password = None
+            st.session_state.parent_email = None
             st.rerun()
 
 
 # Function to create the login form
 def login_page():
+    inject_custom_css()
     st.title("Login")
     
     username = st.text_input("Username")
@@ -117,10 +125,11 @@ def login_page():
     if st.button("Login"):
         credentials = load_credentials()
         if username in credentials:
-            hashed_password = credentials[username]
+            hashed_password = credentials[username]['password']
             if check_password(password, hashed_password.encode('utf-8')):
                 st.session_state['logged_in'] = True
                 st.session_state['username'] = username
+                st.session_state['parent_email'] = credentials[username]['parent_email']
                 st.success("Login successful!")
             else:
                 st.error("Incorrect password.")
@@ -151,6 +160,7 @@ def send_verification_email(sender, recipient, subject, verification_code, body_
     
     # Default email bodies with the verification code and theme
     default_body_text = f"Your verification code for AI Art Buddy is: {verification_code}\n\n"
+    # default_body_html = f"""
     default_body_html = f"""
     <html>
         <head>
@@ -197,6 +207,14 @@ def send_verification_email(sender, recipient, subject, verification_code, body_
                     color: #999999;
                     text-align: center;
                 }}
+                .coppa-info {{
+                    text-align: left;
+                    font-size: 14px;
+                    color: #555555;
+                    margin-top: 20px;
+                    padding-top: 20px;
+                    border-top: 1px solid #dddddd;
+                }}
             </style>
         </head>
         <body>
@@ -208,7 +226,17 @@ def send_verification_email(sender, recipient, subject, verification_code, body_
                     <p>Thank you for signing up!</p>
                     <p>Your verification code is:</p>
                     <p class="verification-code">{verification_code}</p>
-                    <p>Please enter this code to complete your sign-up process.</p>
+                    <p>Please review the parental consent information below. By entering the verification code, you confirm your consent to complete the sign-up process.</p>
+                </div>
+                <div class="coppa-info">
+                    <h2>Parental Consent Required</h2>
+                    <p>In compliance with the Children's Online Privacy Protection Act (COPPA), we require parental consent for children under 13 to use our services. As part of the registration process, we collect the following information:</p>
+                    <ul>
+                        <li><strong>Account Information:</strong> Your child’s username and age, used to personalize their experience.</li>
+                        <li><strong>Artwork Uploads:</strong> Images uploaded by your child, solely for the purpose of providing art feedback.</li>
+                        <li><strong>Parental Contact:</strong> This email address, used to communicate important information regarding your child’s account and consent verification.</li>
+                    </ul>
+                    <p>As a parent, you have the right to review and delete your child’s information at any time. If you have questions or wish to modify your consent, please contact us at aiartbuddy@gmail.com.</p>
                 </div>
                 <div class="footer">
                     <p>&copy; 2024 AI ArtBuddy. All rights reserved.</p>
@@ -256,3 +284,28 @@ def send_verification_email(sender, recipient, subject, verification_code, body_
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return None
+
+def intro_page():
+    inject_custom_css()
+    st.title("Welcome to AI Art Buddy!🎨")
+
+    
+    st.write("""
+        **AI Art Buddy** is a unique art tutoring application designed specifically for children ages 8-10.
+        Our app offers personalized feedback and guidance to help young artists explore their creativity.
+    """)
+
+    st.subheader("Parental Consent Required")
+    st.write("""
+        In compliance with the **Children's Online Privacy Protection Act (COPPA)**, we require parental consent for children under 13 to use our services.
+        Parents will receive a verification email during account setup to confirm consent for their child to use the app.
+    """)
+
+    st.subheader("Session Reports for Parents")
+    st.write("""
+        To keep you informed, **session summaries** will be emailed to the registered parent after each session, 
+        including feedback provided to your child and any progress they make within the app.
+    """)
+
+    # Navigation buttons for Login or Register
+    st.write("To get started, please proceed to create an account or log in.")

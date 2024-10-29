@@ -26,6 +26,11 @@ import getpass
 import os
 import streamlit as st
 import base64
+import urllib3
+from openai import OpenAI
+import random
+import string
+import requests
 
 
 
@@ -38,6 +43,19 @@ class AgentState(TypedDict):
     #facts: Annotated[Sequence[BaseMessage], operator.add]
     # The 'next' field indicates where to route to next
     next: str
+
+def agent_node(state, agent, name):
+    #print(f"Config input: {config}")
+    # create tagging for memory
+    recall_str = (
+        "<recall_memory>\n" + "\n".join(state["recall_memories"]) + "\n</recall_memory>"
+    )
+    result = agent.invoke({
+        "messages": state["messages"],
+        "recall_memories": recall_str,
+    })
+    return {"messages": [result]}
+
 
 def create_agent(openai_key:str, 
                  llm: ChatOpenAI,  
@@ -91,10 +109,23 @@ def moderator_tool(query:str):
 class DalleInput(BaseModel):
     query: str = Field(description="should be a single prompt for image generation")
 
+# @tool("generate_image", args_schema=DalleInput, return_direct=True)
+# def generate_image(query: str):
+#     '''Generate image based on query'''
+#     return DallEAPIWrapper().run(query)
+
 @tool("generate_image", args_schema=DalleInput, return_direct=True)
 def generate_image(query: str):
-    '''Generate image based on query'''
-    return DallEAPIWrapper().run(query)
+    '''Generate image from query, in a style relatable to children 8-10 years old'''
+    client = OpenAI()
+    response = client.images.generate(
+        model = "dall-e-2",
+        prompt = query,
+        size = "512x512",
+        style = "vivid",
+        n = 1
+    )
+    return response.data[0].url
 
 
 def create_nodes(openai_key):
@@ -160,21 +191,6 @@ def create_nodes(openai_key):
     """
     Create Other Agent Nodes
     """
-    # image_moderator = (
-    #     "You are tasked with determining if the image uploaded is appropriate for the application."
-    #     "Appropriate content includes children's drawings that do not include violence, explicit themes, or anything not suitable for an 8-10 year old"
-    #     "If the image is a photograph of something other than a child's drawing, it is not appropriate"
-    #     "Return True if the image is appropriate, and False if it is not"
-    #     "One word answers only. Invoke moderator_tool only once."
-    # )
-
-    # image_moderator_agent = create_agent(
-    #     openai_key, 
-    #     gpt_4o_llm,
-    #     tools=[moderator_tool],
-    #     system_prompt=image_moderator
-    # )
-    # image_moderator_node = functools.partial(agent_node, agent=image_moderator_agent, name="image_moderator_agent")
     
     
     conversation_moderator = (
@@ -196,7 +212,7 @@ def create_nodes(openai_key):
     conversation_moderator_node = functools.partial(agent_node, agent=conversation_moderator_agent, name="conversation_moderator_agent")
 
     
-    storyteller = create_agent(openai_key, gpt_4o_llm,[check_story_completion],"Talk in a teacher's tone to 6-8 years old.\
+    storyteller = create_agent(openai_key, gpt_4o_llm,[check_story_completion],"Talk in a teacher's tone to 8-10 years old.\
     You help user complete a storyline. Use check_story_completion tool to check completion\
     Only finish when complete\
         Otherwise keep building storyline with user.\
@@ -205,7 +221,7 @@ def create_nodes(openai_key):
 
     # visual_artist
     visual_artist = create_agent(openai_key, gpt_4o_llm,[generate_image],"You're a visual artist \
-        You draw in a style that is similar to children's drawings from age 6 to 8, \
+        You draw in a style that is similar to children's drawings from age 8 to 10, \
             Make the style as similar as possible to user's original drawings\
             Your primary job is to help users visualize ideas\
             Input to artist_tool should be a single image description")
@@ -213,7 +229,7 @@ def create_nodes(openai_key):
 
     # critic
     critic = create_agent(openai_key, gpt_4o_llm,[wikipedia_tool],"You give feedback on user's artwork and how to improve.\
-        Talk in an encouraging teacher's tone to 6-8 years old, be consice for each user query \
+        Talk in an encouraging teacher's tone to 8-10 years old, be consice for each user query \
             say no more than 3-4 sentences. Use wikipedia to look up information when users asked for \
                 detailed explanation of art concepts or theories")
     critic_node = functools.partial(agent_node, agent=critic, name="critic")
@@ -250,11 +266,11 @@ def create_nodes(openai_key):
     multiagent.add_conditional_edges("supervisor", lambda x: x["next"], conditional_map)
 
     multiagent.add_edge("storyteller", "conversation_moderator_node")
-    multiagent.add_edge("visual_artist","conversation_moderator_node")
     multiagent.add_edge("critic","conversation_moderator_node")
     multiagent.add_edge("silly","conversation_moderator_node")
 
     # End conditions
+    multiagent.add_edge("visual_artist", END)
     multiagent.add_edge("conversation_moderator_node", END)
 
     graph = multiagent.compile(checkpointer=memory)
@@ -265,6 +281,19 @@ def encode_image(image_path):
   with open(image_path, "rb") as image_file:
     return base64.b64encode(image_file.read()).decode('utf-8')
 
+def generate_random_string(length):
+    """Generates a random string of the specified length."""
+    letters = string.ascii_letters
+    return ''.join(random.choice(letters) for i in range(length))
+
+
+def download_image_requests(url, file_name):
+    response = requests.get(url)
+    if response.status_code == 200:
+        with open(file_name, 'wb') as file:
+            file.write(response.content)
+    else:
+        pass
 
 def stream_messages(graph, text: str, thread: dict, image_path: str= None):
     # Initialize the content with the text message
@@ -298,11 +327,21 @@ def stream_messages(graph, text: str, thread: dict, image_path: str= None):
     # Display just the final message
     if 'conversation_moderator_node' in final_message:
         final_message_str = final_message['conversation_moderator_node']['messages'][0].content
+        # st.write(final_message_str)
+    elif 'visual_artist' in final_message:
+        img_url = s['visual_artist']['messages'][0].content
+        
+        # img_file_path = f"produced_images/AI_generated_image_{generate_random_string(10)}.png"
+        # download_image_requests(url=img_url, file_name=img_file_path)
+        # st.image(img_file_path, width = 300)        
+        final_message_str = img_url
     else:
-        st.write("Warning! Wrong Node")
+        # st.write("Warning! Wrong Node")
         final_message_str = final_message
-    st.write(final_message_str)
+    
+    
     return(final_message)
+
 
 def image_moderation(openai_key, image_path):
     """
