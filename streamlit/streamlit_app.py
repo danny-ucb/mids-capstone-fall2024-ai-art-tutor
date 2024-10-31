@@ -10,8 +10,14 @@ from app_pages.parental_controls import *
 from app_pages.login_registration_page import * 
 from datetime import datetime
 import pytz
-
+import chromadb
+from chromadb.utils import embedding_functions
+import uuid
 timezone = pytz.timezone("America/New_York")
+
+
+
+
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -36,6 +42,7 @@ else:
     # Main application for logged-in users
     openai_key = get_keys()
     inject_custom_css()
+    ensure_vector_store_initialized(openai_key)
     
     # page = st.sidebar.selectbox("Select a page", ["Home", "Parental Controls"])
     main_page, parental_controls = st.tabs(["Home", "Parental Controls"])

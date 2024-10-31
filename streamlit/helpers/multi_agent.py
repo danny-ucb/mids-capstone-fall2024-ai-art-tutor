@@ -1,36 +1,48 @@
-import getpass
-import os
-import openai
-from langchain_core.output_parsers.openai_functions import JsonOutputFunctionsParser
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
-from langchain_openai import ChatOpenAI
-from langchain.utilities import WikipediaAPIWrapper
-from langchain.agents import AgentExecutor, create_openai_tools_agent
+# Standard library imports
+import base64
 import functools
 import operator
-from typing import Sequence, TypedDict, List
-from langchain.pydantic_v1 import BaseModel, Field
-from langchain.tools import BaseTool, StructuredTool, tool
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langgraph.graph import END, StateGraph, START
-from typing import Annotated
-from langchain.utilities import WikipediaAPIWrapper
-from langchain.agents import load_tools
-from langchain_community.utilities.dalle_image_generator import DallEAPIWrapper
-from langgraph.checkpoint.memory import MemorySaver
-from IPython.display import Image, display
-from langchain.chat_models import ChatOpenAI
-import getpass
 import os
-import streamlit as st
-import base64
-import urllib3
-from openai import OpenAI
 import random
 import string
+from typing import Annotated, List, Sequence, TypedDict
+import chromadb
+from chromadb.utils import embedding_functions
+import uuid
+
+# Third-party imports
 import requests
+import streamlit as st
+import tiktoken
+import urllib3
+from IPython.display import Image, display
+from openai import OpenAI
+
+# Langchain core imports
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, get_buffer_string
+from langchain_core.output_parsers.openai_functions import JsonOutputFunctionsParser
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool, tool
+from langchain_core.vectorstores import InMemoryVectorStore
+
+# Langchain specific imports
+from langchain.agents import AgentExecutor, create_openai_tools_agent, load_tools
+from langchain.pydantic_v1 import BaseModel, Field
+from langchain.tools import StructuredTool
+from langchain.utilities import WikipediaAPIWrapper
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_community.utilities.dalle_image_generator import DallEAPIWrapper
+from langchain_openai import ChatOpenAI
+from langchain_openai.embeddings import OpenAIEmbeddings
+
+# Langgraph imports
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.prebuilt import ToolNode
+
 
 
 
@@ -39,8 +51,7 @@ class AgentState(TypedDict):
     # The annotation tells the graph that new messages will always
     # be added to the current states
     messages: Annotated[Sequence[BaseMessage], operator.add]
-    # human_feedback: Annotated[Sequence[HumanMessage], operator.add]
-    #facts: Annotated[Sequence[BaseMessage], operator.add]
+    recall_memories: Annotated[Sequence[str], operator.add]
     # The 'next' field indicates where to route to next
     next: str
 
@@ -69,19 +80,113 @@ def create_agent(openai_key:str,
                 system_prompt,
             ),
             MessagesPlaceholder(variable_name="messages"),
-            MessagesPlaceholder(variable_name="agent_scratchpad")
+            # MessagesPlaceholder(variable_name="agent_scratchpad")
         ]
     )
 
-    agent = create_openai_tools_agent(llm, tools, prompt)
-    executor = AgentExecutor(agent=agent, tools=tools, return_intermediate_steps=True, verbose=True)
-    return executor
+    llm_with_tools = llm.bind_tools(tools)
+    agent_chain = (
+        prompt |
+        llm_with_tools
+    )
+    return agent_chain
+    
+    # agent = create_openai_tools_agent(llm, tools, prompt)
+    # executor = AgentExecutor(agent=agent, tools=tools, return_intermediate_steps=True, verbose=True)
+    # return executor
 
-# Define agent nodes and human feedback nodes
-def agent_node(state, agent, name):
-    result = agent.invoke(state)
-    return {"messages": [AIMessage(content=result["output"], name=name)]}
+# # Define agent nodes and human feedback nodes
+# def agent_node(state, agent, name):
+#     result = agent.invoke(state)
+#     return {"messages": [AIMessage(content=result["output"], name=name)]}
 
+def get_username(config: RunnableConfig) -> str:
+    """Get username from the config."""
+    username = config["configurable"].get("username")
+    if username is None:
+        raise ValueError("Username needs to be provided to save a memory.")
+    return username
+
+tokenizer = tiktoken.encoding_for_model("gpt-4o-mini")
+
+# def load_memories(state: AgentState, config: RunnableConfig) -> AgentState:
+#     """Load memories for the current conversation.
+
+#     Args:
+#         state (schemas.State): The current state of the conversation.
+#         config (RunnableConfig): The runtime configuration for the agent.
+
+#     Returns:
+#         State: The updated state with loaded memories.
+#     """
+#     convo_str = get_buffer_string(state["messages"])
+#     convo_str = tokenizer.decode(tokenizer.encode(convo_str)[:2048])
+#     recall_memories = search_recall_memories.invoke(convo_str, config)
+#     return {
+#         "recall_memories": recall_memories,
+#     }
+
+
+def load_memories(state: AgentState, config: RunnableConfig) -> AgentState:
+    """Load memories for the current conversation.
+
+    Args:
+        state (schemas.State): The current state of the conversation.
+        config (RunnableConfig): The runtime configuration for the agent.
+
+    Returns:
+        AgentState: The updated state with loaded memories.
+    """
+    # Get username for filtering memories
+    username = get_username(config)
+    
+    # Get conversation string from messages
+    convo_str = get_buffer_string(state["messages"])
+    
+    # Truncate to prevent token overflow
+    convo_str = tokenizer.decode(tokenizer.encode(convo_str)[:2048])
+    
+    # Search for relevant memories
+    recall_memories = []
+    try:
+        # Get the vector store instance
+        collection = get_vector_store()
+        
+        # Query for relevant memories based on conversation context
+        query_results = collection.query(
+            query_texts=[convo_str],
+            n_results=3,
+            where={"username": username}
+        )
+        
+        if query_results["documents"] and len(query_results["documents"][0]) > 0:
+            recall_memories = query_results["documents"][0]
+    except Exception as e:
+        print(f"Error loading memories: {str(e)}")
+    
+    # Return state with loaded memories
+    return {
+
+        "recall_memories": recall_memories,
+    }
+
+def route_tools(state: AgentState):
+    """Determine whether to use tools or end the conversation based on the last message.
+
+    Args:
+        state (schemas.State): The current state of the conversation.
+
+    Returns:
+        Literal["tools", "__end__"]: The next step in the graph.
+    """
+    msg = state["messages"][-1]
+    # if tool call is to save_recall_memory or search_recall_memories
+    if hasattr(msg, "additional_kwargs"):
+        tool_calls = msg.additional_kwargs.get("tool_calls")
+        if tool_calls:  # This ensures `tool_calls` is present and non-empty
+            return "tools"
+
+    return END
 
 
 wikipedia = WikipediaAPIWrapper()
@@ -109,10 +214,6 @@ def moderator_tool(query:str):
 class DalleInput(BaseModel):
     query: str = Field(description="should be a single prompt for image generation")
 
-# @tool("generate_image", args_schema=DalleInput, return_direct=True)
-# def generate_image(query: str):
-#     '''Generate image based on query'''
-#     return DallEAPIWrapper().run(query)
 
 @tool("generate_image", args_schema=DalleInput, return_direct=True)
 def generate_image(query: str):
@@ -127,9 +228,78 @@ def generate_image(query: str):
     )
     return response.data[0].url
 
+@tool
+def save_recall_memory(memory: str, config: RunnableConfig) -> str:
+    """Save memory to vectorstore for later semantic retrieval."""
+    username = get_username(config)
+    collection = get_vector_store()
+    
+    collection.add(
+        documents=[memory],
+        metadatas=[{"username": username}],
+        ids=[f"{username}_{str(uuid.uuid4())}"]
+    )
+    return memory
+    
+@tool
+def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
+    """Search for relevant memories."""
+    username = get_username(config)
+    collection = get_vector_store()
+    
+    query_results = collection.query(
+        query_texts=[query],
+        n_results=3,
+        where={"username": username}
+    )
+    if len(query_results["documents"][0]) == 0:
+        return []
+    return [doc[0] for doc in query_results["documents"]]
+    
+
+def get_vector_store():
+    """Get or create vector store instance"""
+    persist_directory = '/home/ubuntu/workspace/mids-capstone-fall2024-ai-art-tutor/streamlit'
+    
+    try:
+        # Create persist directory if it doesn't exist
+        os.makedirs(persist_directory, exist_ok=True)
+        
+        # Initialize the embedding function
+        emb_fn = embedding_functions.OpenAIEmbeddingFunction(
+            api_key=os.environ["OPENAI_API_KEY"],
+            model_name="text-embedding-ada-002"
+        )
+        
+        # Initialize the persistent client
+        client = chromadb.PersistentClient(path=persist_directory)
+        
+        try:
+            # Try to get existing collection
+            collection = client.get_collection(
+                name="recall_vector_store",
+                embedding_function=emb_fn
+            )
+            print("Successfully connected to existing collection")
+            
+        except Exception as e:
+            # If collection doesn't exist, create new collection
+            print(f"Creating new collection due to: {str(e)}")
+            collection = client.create_collection(
+                name="recall_vector_store",
+                embedding_function=emb_fn
+            )
+            print("Successfully created new collection")
+        
+        return collection
+    
+    except Exception as e:
+        print(f"Critical error getting vector store: {str(e)}")
+        raise
+
 
 def create_nodes(openai_key):
-    
+
     """
     Create Supervisor
     """ 
@@ -180,10 +350,15 @@ def create_nodes(openai_key):
     gpt_4o_llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key = openai_key)
     gpt_35_turbo_llm = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key = openai_key)
 
+    # supervisor_chain = (
+    #     prompt
+    #     | gpt_4o_llm.bind_functions(functions=[function_def], function_call="route")
+    #     | JsonOutputFunctionsParser()
+    # )
+
     supervisor_chain = (
         prompt
-        | gpt_4o_llm.bind_functions(functions=[function_def], function_call="route")
-        | JsonOutputFunctionsParser()
+        | gpt_4o_llm.with_structured_output(function_def)
     )
 
 
@@ -191,6 +366,22 @@ def create_nodes(openai_key):
     """
     Create Other Agent Nodes
     """
+
+    memory_usage_prompt =( "Memory Usage Guidelines:\n"
+            "1. Actively use memory tools (save_recall_memory)"
+            " to build a comprehensive understanding of the user.\n"
+            "2. There's no need to explicitly mention your memory capabilities."
+            " Instead, seamlessly incorporate your understanding of the user"
+            " into your responses.\n"
+            "3. Regularly reflect on past interactions to identify patterns and"
+            " preferences.\n"
+            "4. Cross-reference new information with existing memories for"
+            " consistency.\n"     
+            "5. Recognize and acknowledge changes in the user's situation or"
+            " perspectives over time.\n"
+            "## Recall Memories\n"
+            "Recall memories are contextually retrieved based on the current"
+            " conversation:\n\n")
     
     
     conversation_moderator = (
@@ -212,11 +403,11 @@ def create_nodes(openai_key):
     conversation_moderator_node = functools.partial(agent_node, agent=conversation_moderator_agent, name="conversation_moderator_agent")
 
     
-    storyteller = create_agent(openai_key, gpt_4o_llm,[check_story_completion],"Talk in a teacher's tone to 8-10 years old.\
-    You help user complete a storyline. Use check_story_completion tool to check completion\
-    Only finish when complete\
-        Otherwise keep building storyline with user.\
-            Return 'story_complete' when story is complete. Otherwise return 'story_incomplete'")
+    storyteller = create_agent(openai_key, gpt_4o_llm,[check_story_completion],
+                               "Talk in a teacher's tone to 8-10 years old. You help user complete a storyline. Use check_story_completion tool to check completion.\
+                                Only finish when complete otherwise keep building storyline with user. Return 'story_complete' when story is complete. Otherwise return 'story_incomplete' \
+                                Actively use memory tools (save_recall_memory) to build a comprehensive understanding of the user" 
+                              )
     storyteller_node = functools.partial(agent_node, agent=storyteller, name="storyteller")
 
     # visual_artist
@@ -224,53 +415,54 @@ def create_nodes(openai_key):
         You draw in a style that is similar to children's drawings from age 8 to 10, \
             Make the style as similar as possible to user's original drawings\
             Your primary job is to help users visualize ideas\
-            Input to artist_tool should be a single image description")
+            Input to artist_tool should be a single image description. Actively use memory tools (save_recall_memory) to build a comprehensive understanding of the user")
     visual_artist_node = functools.partial(agent_node, agent=visual_artist, name="visual_artist")
 
     # critic
     critic = create_agent(openai_key, gpt_4o_llm,[wikipedia_tool],"You give feedback on user's artwork and how to improve.\
         Talk in an encouraging teacher's tone to 8-10 years old, be consice for each user query \
             say no more than 3-4 sentences. Use wikipedia to look up information when users asked for \
-                detailed explanation of art concepts or theories")
+                detailed explanation of art concepts or theories. Actively use memory tools (save_recall_memory) to build a comprehensive understanding of the user")
     critic_node = functools.partial(agent_node, agent=critic, name="critic")
 
 
     silly = create_agent(openai_key, gpt_4o_llm, [moderator_tool], "You gently redirect the user back to the focus of learning art. \
     If the child is getting off track, for example, saying silly phrases, repeating words, typing the alphabet, or \
-    talking about something unrelated to art, remind them that you are an art teacher. Talk in one or two sentences.")
+    talking about something unrelated to art, remind them that you are an art teacher. Talk in one or two sentences. Actively use memory tools (save_recall_memory) to build a comprehensive understanding of the user")
 
     silly_node = functools.partial(agent_node, agent = silly, name = "silly")
     
     multiagent = StateGraph(AgentState)
-
+    tools = [generate_image, wikipedia_tool, check_story_completion, save_recall_memory, search_recall_memories, moderator_tool]
+    
     # multiagent.add_node("image_moderator_node", image_moderator_node)
     multiagent.add_node("conversation_moderator_node", conversation_moderator_node)
-
+    multiagent.add_node("load_memories", load_memories)
     multiagent.add_node("supervisor", supervisor_chain)
     multiagent.add_node("visual_artist", visual_artist_node)
     multiagent.add_node("critic", critic_node)
     multiagent.add_node("storyteller", storyteller_node)
     multiagent.add_node("silly", silly_node)
+    multiagent.add_node("tools", ToolNode(tools))
 
     memory = MemorySaver()
 
     # Start conditions
-    # multiagent.add_edge(START, "image_moderator_node")
-
-    # multiagent.add_edge("image_moderator_node", "supervisor")
-    multiagent.add_edge(START, "supervisor")
-
-
+    multiagent.add_edge(START, "load_memories")
+    multiagent.add_edge("load_memories", "supervisor")
+    
     # for supervisor to delegate
     conditional_map = {k: k for k in members} 
     multiagent.add_conditional_edges("supervisor", lambda x: x["next"], conditional_map)
+    
+    # for each agent to use memory tools or end converation
+    multiagent.add_conditional_edges("storyteller", route_tools, ["tools", "conversation_moderator_node"])
+    multiagent.add_conditional_edges("critic", route_tools, ["tools","conversation_moderator_node"])
+    multiagent.add_conditional_edges("silly", route_tools, ["tools","conversation_moderator_node"])
+    multiagent.add_conditional_edges("visual_artist", route_tools, ["tools",END])
 
-    multiagent.add_edge("storyteller", "conversation_moderator_node")
-    multiagent.add_edge("critic","conversation_moderator_node")
-    multiagent.add_edge("silly","conversation_moderator_node")
-
-    # End conditions
-    multiagent.add_edge("visual_artist", END)
+    # tools need to report back to agent
+    multiagent.add_conditional_edges("tools", lambda x: x["next"], conditional_map)
     multiagent.add_edge("conversation_moderator_node", END)
 
     graph = multiagent.compile(checkpointer=memory)
@@ -296,6 +488,7 @@ def download_image_requests(url, file_name):
         pass
 
 def stream_messages(graph, text: str, thread: dict, image_path: str= None):
+
     # Initialize the content with the text message
     content = [{"type": "text", "text": text}]
 
@@ -330,13 +523,9 @@ def stream_messages(graph, text: str, thread: dict, image_path: str= None):
         # st.write(final_message_str)
     elif 'visual_artist' in final_message:
         img_url = s['visual_artist']['messages'][0].content
-        
-        # img_file_path = f"produced_images/AI_generated_image_{generate_random_string(10)}.png"
-        # download_image_requests(url=img_url, file_name=img_file_path)
-        # st.image(img_file_path, width = 300)        
+   
         final_message_str = img_url
     else:
-        # st.write("Warning! Wrong Node")
         final_message_str = final_message
     
     
