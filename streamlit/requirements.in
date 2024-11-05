@@ -8,9 +8,6 @@ langchain-openai
 langgraph
 langchain-community
 chromadb
-scrubadub
-scrubadub_address
-scrubadub_stanford
-spacy>=3.7.2,<3.8.0
-scrubadub_spacy
-urllib3
+semantic_router 
+urllib3==2.0.7
+requests==2.31.0

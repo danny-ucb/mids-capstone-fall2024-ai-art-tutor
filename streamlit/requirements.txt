@@ -10,6 +10,7 @@ aiohttp==3.10.10
     # via
     #   langchain
     #   langchain-community
+    #   semantic-router
 aiosignal==1.3.1
     # via aiohttp
 altair==5.4.1
@@ -39,8 +40,6 @@ bcrypt==4.2.0
     # via chromadb
 blinker==1.8.2
     # via streamlit
-blis==0.7.11
-    # via thinc
 boto3==1.35.48
     # via -r requirements.in
 botocore==1.35.48
@@ -54,12 +53,6 @@ cachetools==5.5.0
     # via
     #   google-auth
     #   streamlit
-catalogue==2.0.10
-    # via
-    #   scrubadub
-    #   spacy
-    #   srsly
-    #   thinc
 certifi==2024.8.30
     # via
     #   httpcore
@@ -74,28 +67,17 @@ chromadb==0.5.15
     # via -r requirements.in
 click==8.1.7
     # via
-    #   nltk
-    #   sacremoses
     #   streamlit
     #   typer
     #   uvicorn
-cloudpathlib==0.20.0
-    # via weasel
+colorama==0.4.6
+    # via semantic-router
 coloredlogs==15.0.1
     # via onnxruntime
-confection==0.1.5
-    # via
-    #   thinc
-    #   weasel
-cymem==2.0.8
-    # via
-    #   preshed
-    #   spacy
-    #   thinc
+colorlog==6.9.0
+    # via semantic-router
 dataclasses-json==0.6.7
     # via langchain-community
-dateparser==1.2.0
-    # via scrubadub
 deprecated==1.2.14
     # via
     #   opentelemetry-api
@@ -105,20 +87,12 @@ distro==1.9.0
     # via openai
 durationpy==0.9
     # via kubernetes
-emoji==2.14.0
-    # via stanza
 exceptiongroup==1.2.2
     # via anyio
-faker==30.8.1
-    # via scrubadub
 fastapi==0.115.3
     # via chromadb
 filelock==3.16.1
-    # via
-    #   huggingface-hub
-    #   torch
-    #   transformers
-    #   triton
+    # via huggingface-hub
 flatbuffers==24.3.25
     # via onnxruntime
 frozenlist==1.5.0
@@ -126,9 +100,7 @@ frozenlist==1.5.0
     #   aiohttp
     #   aiosignal
 fsspec==2024.10.0
-    # via
-    #   huggingface-hub
-    #   torch
+    # via huggingface-hub
 gitdb==4.0.11
     # via gitpython
 gitpython==3.1.43
@@ -160,9 +132,7 @@ httpx==0.27.2
 httpx-sse==0.4.0
     # via langgraph-sdk
 huggingface-hub==0.26.1
-    # via
-    #   tokenizers
-    #   transformers
+    # via tokenizers
 humanfriendly==10.0
     # via coloredlogs
 idna==3.10
@@ -181,19 +151,12 @@ jinja2==3.1.4
     # via
     #   altair
     #   pydeck
-    #   spacy
-    #   torch
 jiter==0.6.1
     # via openai
 jmespath==1.0.1
     # via
     #   boto3
     #   botocore
-joblib==1.4.2
-    # via
-    #   nltk
-    #   sacremoses
-    #   scikit-learn
 jsonpatch==1.33
     # via langchain-core
 jsonpointer==3.0.0
@@ -222,8 +185,6 @@ langchain-openai==0.2.3
     # via -r requirements.in
 langchain-text-splitters==0.3.0
     # via langchain
-langcodes==3.4.1
-    # via spacy
 langgraph==0.2.39
     # via -r requirements.in
 langgraph-checkpoint==2.0.2
@@ -235,10 +196,6 @@ langsmith==0.1.137
     #   langchain
     #   langchain-community
     #   langchain-core
-language-data==1.2.0
-    # via langcodes
-marisa-trie==1.2.1
-    # via language-data
 markdown-it-py==3.0.0
     # via rich
 markupsafe==2.1.5
@@ -259,26 +216,12 @@ multidict==6.1.0
     # via
     #   aiohttp
     #   yarl
-murmurhash==1.0.10
-    # via
-    #   preshed
-    #   spacy
-    #   thinc
 mypy-extensions==1.0.0
     # via typing-inspect
 narwhals==1.8.1
     # via altair
-networkx==3.4.2
-    # via
-    #   stanza
-    #   torch
-nltk==3.9.1
-    # via
-    #   scrubadub-stanford
-    #   textblob
 numpy==1.26.4
     # via
-    #   blis
     #   chroma-hnswlib
     #   chromadb
     #   langchain
@@ -287,46 +230,9 @@ numpy==1.26.4
     #   pandas
     #   pyarrow
     #   pydeck
-    #   scikit-learn
-    #   scipy
-    #   spacy
-    #   spacy-transformers
-    #   stanza
+    #   semantic-router
     #   streamlit
     #   streamlit-drawable-canvas
-    #   thinc
-    #   transformers
-nvidia-cublas-cu12==12.1.3.1
-    # via
-    #   nvidia-cudnn-cu12
-    #   nvidia-cusolver-cu12
-    #   torch
-nvidia-cuda-cupti-cu12==12.1.105
-    # via torch
-nvidia-cuda-nvrtc-cu12==12.1.105
-    # via torch
-nvidia-cuda-runtime-cu12==12.1.105
-    # via torch
-nvidia-cudnn-cu12==9.1.0.70
-    # via torch
-nvidia-cufft-cu12==11.0.2.54
-    # via torch
-nvidia-curand-cu12==10.3.2.106
-    # via torch
-nvidia-cusolver-cu12==11.4.5.107
-    # via torch
-nvidia-cusparse-cu12==12.1.0.106
-    # via
-    #   nvidia-cusolver-cu12
-    #   torch
-nvidia-nccl-cu12==2.20.5
-    # via torch
-nvidia-nvjitlink-cu12==12.6.77
-    # via
-    #   nvidia-cusolver-cu12
-    #   nvidia-cusparse-cu12
-nvidia-nvtx-cu12==12.1.105
-    # via torch
 oauthlib==3.2.2
     # via
     #   kubernetes
@@ -337,6 +243,7 @@ openai==1.52.2
     # via
     #   -r requirements.in
     #   langchain-openai
+    #   semantic-router
 opentelemetry-api==1.27.0
     # via
     #   chromadb
@@ -390,25 +297,15 @@ packaging==23.2
     #   langchain-core
     #   marshmallow
     #   onnxruntime
-    #   spacy
     #   streamlit
-    #   thinc
-    #   transformers
-    #   weasel
 pandas==2.2.2
     # via streamlit
-phonenumbers==8.13.48
-    # via scrubadub
 pillow==10.4.0
     # via
     #   streamlit
     #   streamlit-drawable-canvas
 posthog==3.7.0
     # via chromadb
-preshed==3.0.9
-    # via
-    #   spacy
-    #   thinc
 propcache==0.2.0
     # via yarl
 protobuf==4.25.5
@@ -416,10 +313,7 @@ protobuf==4.25.5
     #   googleapis-common-protos
     #   onnxruntime
     #   opentelemetry-proto
-    #   stanza
     #   streamlit
-pyap==0.3.1
-    # via scrubadub-address
 pyarrow==17.0.0
     # via streamlit
 pyasn1==0.6.1
@@ -431,16 +325,13 @@ pyasn1-modules==0.4.1
 pydantic==2.9.2
     # via
     #   chromadb
-    #   confection
     #   fastapi
     #   langchain
     #   langchain-core
     #   langsmith
     #   openai
     #   pydantic-settings
-    #   spacy
-    #   thinc
-    #   weasel
+    #   semantic-router
 pydantic-core==2.23.4
     # via pydantic
 pydantic-settings==2.6.0
@@ -456,8 +347,6 @@ pyproject-hooks==1.2.0
 python-dateutil==2.9.0.post0
     # via
     #   botocore
-    #   dateparser
-    #   faker
     #   kubernetes
     #   pandas
     #   posthog
@@ -466,12 +355,8 @@ python-dotenv==1.0.1
     # via
     #   pydantic-settings
     #   uvicorn
-python-stdnum==1.20
-    # via scrubadub
 pytz==2024.2
-    # via
-    #   dateparser
-    #   pandas
+    # via pandas
 pyyaml==6.0.2
     # via
     #   chromadb
@@ -480,7 +365,7 @@ pyyaml==6.0.2
     #   langchain
     #   langchain-community
     #   langchain-core
-    #   transformers
+    #   semantic-router
     #   uvicorn
 referencing==0.35.1
     # via
@@ -488,27 +373,24 @@ referencing==0.35.1
     #   jsonschema-specifications
 regex==2024.9.11
     # via
-    #   dateparser
-    #   nltk
-    #   sacremoses
+    #   semantic-router
     #   tiktoken
-    #   transformers
-requests==2.32.3
+requests==2.31.0
     # via
+    #   -r requirements.in
     #   huggingface-hub
     #   kubernetes
     #   langchain
     #   langchain-community
     #   langsmith
     #   posthog
+    #   requests-mock
     #   requests-oauthlib
     #   requests-toolbelt
-    #   spacy
-    #   stanza
     #   streamlit
     #   tiktoken
-    #   transformers
-    #   weasel
+requests-mock==1.12.1
+    # via semantic-router
 requests-oauthlib==2.0.0
     # via kubernetes
 requests-toolbelt==1.0.0
@@ -526,23 +408,7 @@ rsa==4.9
     # via google-auth
 s3transfer==0.10.3
     # via boto3
-sacremoses==0.1.1
-    # via transformers
-scikit-learn==1.5.2
-    # via scrubadub
-scipy==1.14.1
-    # via scikit-learn
-scrubadub==2.0.1
-    # via
-    #   -r requirements.in
-    #   scrubadub-address
-    #   scrubadub-spacy
-    #   scrubadub-stanford
-scrubadub-address==2.0.1
-    # via -r requirements.in
-scrubadub-spacy==2.0.0
-    # via -r requirements.in
-scrubadub-stanford==2.1.3
+semantic-router==0.0.72
     # via -r requirements.in
 shellingham==1.5.4
     # via typer
@@ -551,8 +417,6 @@ six==1.16.0
     #   kubernetes
     #   posthog
     #   python-dateutil
-smart-open==7.0.5
-    # via weasel
 smmap==5.0.1
     # via gitdb
 sniffio==1.3.1
@@ -560,32 +424,10 @@ sniffio==1.3.1
     #   anyio
     #   httpx
     #   openai
-spacy[transformers]==3.7.5
-    # via
-    #   -r requirements.in
-    #   scrubadub-spacy
-    #   spacy-transformers
-spacy-alignments==0.9.1
-    # via spacy-transformers
-spacy-legacy==3.0.12
-    # via spacy
-spacy-loggers==1.0.5
-    # via spacy
-spacy-transformers==1.3.5
-    # via spacy
 sqlalchemy==2.0.36
     # via
     #   langchain
     #   langchain-community
-srsly==2.4.8
-    # via
-    #   confection
-    #   spacy
-    #   spacy-transformers
-    #   thinc
-    #   weasel
-stanza==1.9.2
-    # via scrubadub-stanford
 starlette==0.41.0
     # via fastapi
 streamlit==1.29.0
@@ -595,9 +437,7 @@ streamlit==1.29.0
 streamlit-drawable-canvas==0.9.3
     # via -r requirements.in
 sympy==1.13.3
-    # via
-    #   onnxruntime
-    #   torch
+    # via onnxruntime
 tenacity==8.5.0
     # via
     #   chromadb
@@ -605,57 +445,31 @@ tenacity==8.5.0
     #   langchain-community
     #   langchain-core
     #   streamlit
-textblob==0.15.3
-    # via scrubadub
-thinc==8.2.5
-    # via spacy
-threadpoolctl==3.5.0
-    # via scikit-learn
 tiktoken==0.8.0
-    # via langchain-openai
-tokenizers==0.20.1
     # via
-    #   chromadb
-    #   transformers
+    #   langchain-openai
+    #   semantic-router
+tokenizers==0.20.1
+    # via chromadb
 toml==0.10.2
     # via streamlit
 tomli==2.0.2
-    # via
-    #   build
-    #   stanza
-torch==2.4.1
-    # via
-    #   spacy-transformers
-    #   stanza
+    # via build
 tornado==6.4.1
     # via streamlit
 tqdm==4.66.5
     # via
     #   chromadb
     #   huggingface-hub
-    #   nltk
     #   openai
-    #   sacremoses
-    #   spacy
-    #   stanza
-    #   transformers
-transformers==4.17.0
-    # via spacy-transformers
-triton==3.0.0
-    # via torch
 typer==0.12.5
-    # via
-    #   chromadb
-    #   spacy
-    #   weasel
+    # via chromadb
 typing-extensions==4.12.2
     # via
     #   altair
     #   anyio
     #   asgiref
     #   chromadb
-    #   cloudpathlib
-    #   faker
     #   fastapi
     #   huggingface-hub
     #   langchain-core
@@ -664,10 +478,8 @@ typing-extensions==4.12.2
     #   opentelemetry-sdk
     #   pydantic
     #   pydantic-core
-    #   scrubadub
     #   sqlalchemy
     #   streamlit
-    #   torch
     #   typer
     #   typing-inspect
     #   uvicorn
@@ -676,10 +488,8 @@ typing-inspect==0.9.0
 tzdata==2024.1
     # via pandas
 tzlocal==5.2
-    # via
-    #   dateparser
-    #   streamlit
-urllib3==1.26.0
+    # via streamlit
+urllib3==2.0.7
     # via
     #   -r requirements.in
     #   botocore
@@ -691,28 +501,18 @@ uvloop==0.21.0
     # via uvicorn
 validators==0.34.0
     # via streamlit
-wasabi==1.1.3
-    # via
-    #   spacy
-    #   thinc
-    #   weasel
 watchdog==5.0.2
     # via streamlit
 watchfiles==0.24.0
     # via uvicorn
-weasel==0.4.1
-    # via spacy
 websocket-client==1.8.0
     # via kubernetes
 websockets==13.1
     # via uvicorn
-wheel==0.44.0
-    # via scrubadub-spacy
 wrapt==1.16.0
     # via
     #   deprecated
     #   opentelemetry-instrumentation
-    #   smart-open
 yarl==1.16.0
     # via aiohttp
 zipp==3.20.2
