@@ -10,8 +10,11 @@ from app_pages.parental_controls import *
 from app_pages.login_registration_page import * 
 from datetime import datetime
 import pytz
-
+import chromadb
+from chromadb.utils import embedding_functions
+import uuid
 timezone = pytz.timezone("America/New_York")
+
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -73,7 +76,7 @@ else:
             
             st.session_state['current_image'] = save_path
             st.image(uploaded_image, caption="Your uploaded artwork", width=200)
-            image_moderator_result = image_moderation(openai_key, image_path=save_path)
+            # image_moderator_result = image_moderation(openai_key, image_path=save_path)
         
         # Start Chat button
         if not st.session_state['chat_active']:
@@ -155,26 +158,17 @@ else:
                     })
 
                     # Get AI response
-                    thread_config = {"configurable": {"user_id": "1", "thread_id": "1"}}
+                    thread_config = {"configurable": {"username": st.session_state['username'], "thread_id": "1"}}
                     
                     try:
                         response = None
                         if st.session_state['current_image']:
-                            if image_moderator_result is True: 
-                                response = stream_messages(
-                                    st.session_state['graph'],
-                                    text=user_input,
-                                    thread=thread_config,
-                                    image_path=st.session_state['current_image']
-                                )
-                            else:
-                                moderation_message = ("Oops! This app is designed for your own art sketches. "
-                                                   "Please try uploading a drawing or sketch you've made by hand. "
-                                                   "We can't wait to see your creative artwork! 🎨")
-                                st.session_state['messages'].append({
-                                    "role": "assistant",
-                                    "content": moderation_message
-                                })
+                            response = stream_messages(
+                                st.session_state['graph'],
+                                text=user_input,
+                                thread=thread_config,
+                                image_path=st.session_state['current_image']
+                            )
                         else:
                             response = stream_messages(
                                 st.session_state['graph'],
@@ -186,12 +180,22 @@ else:
                         if response:
                             content = None
                             if isinstance(response, dict):
-                                for node_key in ['conversation_moderator_node', 'visual_artist']:
-                                    if node_key in response:
-                                        messages = response[node_key].get('messages', [])
-                                        if messages and hasattr(messages[0], 'content'):
-                                            content = messages[0].content
-                                            break
+                                # Check for moderator response first
+                                if 'moderator' in response:
+                                    content = response['moderator'].get('moderator_response', '')
+                                # Check for messages from different agents
+                                elif 'messages' in response:
+                                    messages = response['messages']
+                                    if messages and len(messages) > 0:
+                                        content = messages[0].content
+                                # Check for specific agent responses
+                                else:
+                                    for node_key in ['visual_artist', 'critic', 'storyteller', 'silly']:
+                                        if node_key in response and 'messages' in response[node_key]:
+                                            messages = response[node_key]['messages']
+                                            if messages and len(messages) > 0:
+                                                content = messages[0].content
+                                                break
                             
                             if content:
                                 st.session_state['messages'].append({

@@ -17,6 +17,9 @@ from datetime import datetime
 import pandas as pd
 import pytz
 import boto3
+from helpers.multi_agent import * 
+from typing import List, Dict
+import chromadb
 
 def transform_messages_to_conversation(messages):
     conversation = []
@@ -127,36 +130,486 @@ def save_session_summary():
                                 session_details = session_summary)
     st.success(f"Session email sent to {st.session_state['parent_email']}")
 
+def list_all_memories(username: str = None) -> List[Dict]:
+    """List all memories in the vector store, optionally filtered by username.
+    
+    Args:
+        username (str, optional): If provided, only show memories for this user
+        
+    Returns:
+        List[Dict]: List of dictionaries containing memory details
+    """
+    collection = get_vector_store()
+    
+    # Query parameters
+    where_filter = {"username": username} if username else None
+    
+    # Get all memories
+    results = collection.get(
+        where=where_filter,
+        include=['metadatas', 'documents', 'embeddings']
+    )
+    
+    # Format results
+    memories = []
+    for i in range(len(results['ids'])):
+        memories.append({
+            'id': results['ids'][i],
+            'content': results['documents'][i],
+            'metadata': results['metadatas'][i]
+        })
+    
+    return memories
+
+def update_memory(memory_id: str, new_content: str) -> bool:
+    """Update the content of a specific memory.
+    
+    Args:
+        memory_id (str): The ID of the memory to update
+        new_content (str): The new content for the memory
+        
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    try:
+        collection = get_vector_store()
+        
+        # Get existing metadata
+        existing = collection.get(
+            ids=[memory_id],
+            include=['metadatas']
+        )
+        
+        if not existing['ids']:
+            return False
+            
+        # Update the memory
+        collection.update(
+            ids=[memory_id],
+            documents=[new_content],
+            metadatas=[existing['metadatas'][0]]
+        )
+        return True
+    except Exception as e:
+        print(f"Error updating memory: {str(e)}")
+        return False
+
+def delete_memory(memory_id: str) -> bool:
+    """Delete a specific memory.
+    
+    Args:
+        memory_id (str): The ID of the memory to delete
+        
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
+    try:
+        collection = get_vector_store()
+        collection.delete(ids=[memory_id])
+        return True
+    except Exception as e:
+        print(f"Error deleting memory: {str(e)}")
+        return False
+
+def delete_user_memories(username: str) -> bool:
+    """Delete all memories for a specific user.
+    
+    Args:
+        username (str): The username whose memories should be deleted
+        
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
+    try:
+        collection = get_vector_store()
+        collection.delete(where={"username": username})
+        return True
+    except Exception as e:
+        print(f"Error deleting user memories: {str(e)}")
+        return False
+
+def search_memories(query: str, username: str = None, limit: int = 5) -> List[Dict]:
+    """Search memories based on semantic similarity.
+    
+    Args:
+        query (str): The search query
+        username (str, optional): If provided, only search memories for this user
+        limit (int): Maximum number of results to return
+        
+    Returns:
+        List[Dict]: List of relevant memories
+    """
+    collection = get_vector_store()
+    
+    # Query parameters
+    where_filter = {"username": username} if username else None
+    
+    results = collection.query(
+        query_texts=[query],
+        n_results=limit,
+        where=where_filter
+    )
+    
+    # Format results
+    memories = []
+    for i in range(len(results['ids'][0])):
+        memories.append({
+            'id': results['ids'][0][i],
+            'content': results['documents'][0][i],
+            'metadata': results['metadatas'][0][i],
+            'distance': results['distances'][0][i]
+        })
+    
+    return memories
 
 def parental_controls_page():
     st.title("Parental Controls Dashboard")
-    st.subheader("Session Summaries")
 
-    sessions = load_session_data(st.session_state["username"])
-    if sessions:
-        for session in sessions:
+    tab1, tab2 = st.tabs(["Session Summaries", "Memory Management"])
+    
+    with tab1:
+        st.subheader("Session Summaries")
+        sessions = load_session_data(st.session_state["username"])
+        if sessions:
+            for session in sessions:
+                st.markdown(
+                    f"""
+                    <div style="
+                        padding: 1rem; 
+                        margin-bottom: 1rem; 
+                        border-radius: 8px; 
+                        background-color: #f9f9f9;
+                        border: 1px solid #e1e1e1;
+                        box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);
+                    ">
+                        <h4 style="margin: 0;">🗓️ Date: {session["date"]}</h4>
+                        <p style="margin: 0;"><strong>Session Start Time:</strong> {session["start_time"]}</p>
+                        <p style="margin: 0.5rem 0;"><strong>Duration:</strong> {session['duration_minutes']} minutes</p>
+                        <p style="margin: 0;"><strong>Number of Messages:</strong> {session['message_count']}</p>
+                        <p style="margin: 0;"><strong>Summary:</strong> {session['summary'].replace("Summary: ", "")}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+        else:
+            st.write("No saved session information yet!")
             
+    with tab2:
+        st.subheader("Memory Management")
+        with st.expander("ℹ️ About Memory Management"):
+            st.markdown("""
+            ### Managing AI ArtBuddy's Memories
+            
+            - **Search**: Use the search bar to find specific memories by content
+            - **View**: All memories are displayed in a list format
+            - **Edit**: Click the edit button to modify a memory
+            - **Delete**: Remove individual memories or use 'Delete All' to start fresh
+            
+            Memories help AI ArtBuddy provide more personalized assistance by remembering past interactions and preferences.
+            """)
+
+        # Search functionality
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            search_query = st.text_input("🔍 Search memories", placeholder="Enter keywords to search...")
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)  # Add spacing
+            if st.button("🗑️ Delete All Memories", type="secondary", help="This will delete all memories for this user"):
+                if delete_user_memories(st.session_state["username"]):
+                    st.success("All memories have been deleted successfully!")
+                    st.rerun()
+                else:
+                    st.error("Failed to delete all memories")
+
+        # Get memories based on search or show all
+        if search_query:
+            memories = search_memories(search_query, st.session_state["username"])
+        else:
+            memories = list_all_memories(st.session_state["username"])
+
+        if memories:
             st.markdown(
-                f"""
-                <div style="
-                    padding: 1rem; 
-                    margin-bottom: 1rem; 
-                    border-radius: 8px; 
-                    background-color: #f9f9f9;
-                    border: 1px solid #e1e1e1;
-                    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);
-                ">
-                    <h4 style="margin: 0;">🗓️ Date: {session["date"]}</h4>
-                    <p style="margin: 0;"><strong>Session Start Time:</strong> {session["start_time"]}</p>
-                    <p style="margin: 0.5rem 0;"><strong>Duration:</strong> {session['duration_minutes']} minutes</p>
-                    <p style="margin: 0;"><strong>Number of Messages:</strong> {session['message_count']}</p>
-                    <p style="margin: 0;"><strong>Summary:</strong> {session['summary'].replace("Summary: ", "")}</p>
-                </div>
+                """
+                <style>
+                    .memory-list-item {
+                        background-color: white;
+                        padding: 1rem;
+                        margin: 0.5rem 0;
+                        border-radius: 8px;
+                        border: 1px solid #e1e1e1;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                    }
+                    .memory-metadata {
+                        color: #666;
+                        font-size: 0.85em;
+                    }
+                </style>
                 """,
                 unsafe_allow_html=True
             )
-    else:
-        st.write("No saved session information yet!")
+
+            # Initialize session state for edit mode if not exists
+            if 'editing_memory' not in st.session_state:
+                st.session_state.editing_memory = None
+
+            for memory in memories:
+                with st.container():
+                    # Display memory as a list item
+                    col1, col2 = st.columns([4, 1])
+                    
+                    with col1:
+                        st.markdown(
+                            f"""
+                            <div class="memory-list-item">
+                                <p>{memory['content']}</p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                    
+                    with col2:
+                        # Edit button to enter edit mode
+                        if st.button("✍️ Edit", key=f"edit_{memory['id']}", 
+                                   help="Edit this memory"):
+                            st.session_state.editing_memory = memory['id']
+                        
+                        if st.button("🗑️ Delete", key=f"delete_{memory['id']}", 
+                                   help="Delete this memory permanently"):
+                            if delete_memory(memory['id']):
+                                st.success("Memory deleted!")
+                                st.rerun()
+                            else:
+                                st.error("Deletion failed")
+                    
+                    # Show edit form if this memory is being edited
+                    if st.session_state.editing_memory == memory['id']:
+                        with st.container():
+                            st.markdown("### Edit Memory")
+                            new_content = st.text_area(
+                                "Edit memory content:",
+                                value=memory['content'],
+                                key=f"memory_{memory['id']}",
+                                height=100
+                            )
+                            
+                            col1, col2 = st.columns([1, 4])
+                            with col1:
+                                if st.button("💾 Save", key=f"save_{memory['id']}", 
+                                           help="Save changes"):
+                                    if update_memory(memory['id'], new_content):
+                                        st.success("Memory updated!")
+                                        st.session_state.editing_memory = None
+                                        st.rerun()
+                                    else:
+                                        st.error("Update failed")
+                            with col2:
+                                if st.button("❌ Cancel", key=f"cancel_{memory['id']}", 
+                                           help="Cancel editing"):
+                                    st.session_state.editing_memory = None
+                                    st.rerun()
+
+                    # Add a visual separator between memories
+                    st.markdown("---")
+        
+        else:
+            st.info("🤔 No memories found! Memories will be created as you interact with AI ArtBuddy.")
+
+        # Help information
+
+
+# def parental_controls_page():
+#     st.title("Parental Controls Dashboard")
+
+#     tab1, tab2 = st.tabs(["Session Summaries", "Memory Management"])
+    
+#     with tab1:
+#         st.subheader("Session Summaries")
+#         sessions = load_session_data(st.session_state["username"])
+#         if sessions:
+#             for session in sessions:
+#                 st.markdown(
+#                     f"""
+#                     <div style="
+#                         padding: 1rem; 
+#                         margin-bottom: 1rem; 
+#                         border-radius: 8px; 
+#                         background-color: #f9f9f9;
+#                         border: 1px solid #e1e1e1;
+#                         box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.1);
+#                     ">
+#                         <h4 style="margin: 0;">🗓️ Date: {session["date"]}</h4>
+#                         <p style="margin: 0;"><strong>Session Start Time:</strong> {session["start_time"]}</p>
+#                         <p style="margin: 0.5rem 0;"><strong>Duration:</strong> {session['duration_minutes']} minutes</p>
+#                         <p style="margin: 0;"><strong>Number of Messages:</strong> {session['message_count']}</p>
+#                         <p style="margin: 0;"><strong>Summary:</strong> {session['summary'].replace("Summary: ", "")}</p>
+#                     </div>
+#                     """,
+#                     unsafe_allow_html=True
+#                 )
+#         else:
+#             st.write("No saved session information yet!")
+            
+#     with tab2:
+#         st.subheader("Memory Management")
+
+#         st.write("### Debug Information")
+#         try:
+#             # Check if username exists in session state
+#             if 'username' not in st.session_state:
+#                 st.error("No username found in session state!")
+#                 return
+                
+#             st.success(f"Current user: {st.session_state['username']}")
+            
+#             # Try to get vector store
+#             collection = get_vector_store()
+#             st.success("Successfully connected to vector store")
+            
+#             # Get all memories for debugging
+#             memories = list_all_memories(st.session_state["username"])
+#             st.write(f"Number of memories found: {len(memories)}")
+            
+#             if not memories:
+#                 st.warning("No memories found for this user. This could be because:")
+#                 st.write("1. No memories have been saved yet")
+#                 st.write("2. The memory store connection isn't working")
+#                 st.write("3. The username filter isn't working correctly")
+                
+#                 # Check the total number of memories in the collection
+#                 total_results = collection.get()
+#                 st.write(f"Total memories in collection: {len(total_results['ids'])}")
+                
+#                 if len(total_results['ids']) > 0:
+#                     st.write("Sample metadata from collection:")
+#                     st.json(total_results['metadatas'][:5])
+            
+#         except Exception as e:
+#             st.error(f"Error accessing memories: {str(e)}")
+#             return
+
+
+
+        
+#         # Help information
+#         with st.expander("ℹ️ About Memory Management"):
+#             st.markdown("""
+#             ### Managing AI ArtBuddy's Memories
+            
+#             - **Search**: Use the search bar to find specific memories by content
+#             - **View**: All memories are displayed in a list format
+#             - **Edit**: Click the edit button to modify a memory
+#             - **Delete**: Remove individual memories or use 'Delete All' to start fresh
+            
+#             Memories help AI ArtBuddy provide more personalized assistance by remembering past interactions and preferences.
+#             """)
+#         # Search functionality
+#         col1, col2 = st.columns([3, 1])
+#         with col1:
+#             search_query = st.text_input("🔍 Search memories", placeholder="Enter keywords to search...")
+#         with col2:
+#             st.markdown("<br>", unsafe_allow_html=True)  # Add spacing
+#             if st.button("🗑️ Delete All Memories", type="secondary", help="This will delete all memories for this user"):
+#                 if delete_user_memories(st.session_state["username"]):
+#                     st.success("All memories have been deleted successfully!")
+#                     st.rerun()
+#                 else:
+#                     st.error("Failed to delete all memories")
+
+#         # Get memories based on search or show all
+#         if search_query:
+#             memories = search_memories(search_query, st.session_state["username"])
+#         else:
+#             memories = list_all_memories(st.session_state["username"])
+
+#         if memories:
+#             st.markdown(
+#                 """
+#                 <style>
+#                     .memory-list-item {
+#                         background-color: white;
+#                         padding: 1rem;
+#                         margin: 0.5rem 0;
+#                         border-radius: 8px;
+#                         border: 1px solid #e1e1e1;
+#                         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+#                     }
+#                     .memory-metadata {
+#                         color: #666;
+#                         font-size: 0.85em;
+#                     }
+#                 </style>
+#                 """,
+#                 unsafe_allow_html=True
+#             )
+
+#             # Initialize session state for edit mode if not exists
+#             if 'editing_memory' not in st.session_state:
+#                 st.session_state.editing_memory = None
+
+#             for memory in memories:
+#                 with st.container():
+#                     # Display memory as a list item
+#                     col1, col2 = st.columns([4, 1])
+                    
+#                     with col1:
+#                         st.markdown(
+#                             f"""
+#                             <div class="memory-list-item">
+#                                 <p>{memory['content']}</p>
+#                                 <p class="memory-metadata">Created: {memory['metadata'].get('date', 'N/A')}</p>
+#                             </div>
+#                             """,
+#                             unsafe_allow_html=True
+#                         )
+                    
+#                     with col2:
+#                         # Edit button to enter edit mode
+#                         if st.button("✍️ Edit", key=f"edit_{memory['id']}", 
+#                                    help="Edit this memory"):
+#                             st.session_state.editing_memory = memory['id']
+                        
+#                         if st.button("🗑️ Delete", key=f"delete_{memory['id']}", 
+#                                    help="Delete this memory permanently"):
+#                             if delete_memory(memory['id']):
+#                                 st.success("Memory deleted!")
+#                                 st.rerun()
+#                             else:
+#                                 st.error("Deletion failed")
+                    
+#                     # Show edit form if this memory is being edited
+#                     if st.session_state.editing_memory == memory['id']:
+#                         with st.container():
+#                             st.markdown("### Edit Memory")
+#                             new_content = st.text_area(
+#                                 "Edit memory content:",
+#                                 value=memory['content'],
+#                                 key=f"memory_{memory['id']}",
+#                                 height=100
+#                             )
+                            
+#                             col1, col2 = st.columns([1, 4])
+#                             with col1:
+#                                 if st.button("💾 Save", key=f"save_{memory['id']}", 
+#                                            help="Save changes"):
+#                                     if update_memory(memory['id'], new_content):
+#                                         st.success("Memory updated!")
+#                                         st.session_state.editing_memory = None
+#                                         st.rerun()
+#                                     else:
+#                                         st.error("Update failed")
+#                             with col2:
+#                                 if st.button("❌ Cancel", key=f"cancel_{memory['id']}", 
+#                                            help="Cancel editing"):
+#                                     st.session_state.editing_memory = None
+#                                     st.rerun()
+
+#                     # Add a visual separator between memories
+#                     st.markdown("---")
+        
+#         else:
+#             st.info("🤔 No memories found! Memories will be created as you interact with AI ArtBuddy.")
+
+
 
 def send_session_summary_email(sender, recipient, subject, session_details, body_text=None, body_html=None):
     """
