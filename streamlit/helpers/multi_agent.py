@@ -1,3 +1,4 @@
+#multi_agent.py
 # Standard library imports
 import base64
 import functools
@@ -9,6 +10,13 @@ from typing import Annotated, List, Sequence, TypedDict
 import chromadb
 from chromadb.utils import embedding_functions
 import uuid
+
+#Other Scripts
+from helpers.general_helpers import *
+from helpers.memory_utils import *
+from helpers.image_helpers import * 
+from helpers.api_keys import * 
+from helpers.consent_utils import * 
 
 # Third-party imports
 import requests
@@ -184,75 +192,141 @@ def generate_image(query: str):
     return response.data[0].url
 
 
-@tool
+# @tool
+# def save_recall_memory(memory: str, config: RunnableConfig) -> str:
+#     """Save memory to vectorstore for later semantic retrieval."""
+#     username = get_username(config)
+#     collection = get_vector_store()
+    
+#     collection.add(
+#         documents=[memory],
+#         metadatas=[{"username": username}],
+#         ids=[f"{username}_{str(uuid.uuid4())}"]
+#     )
+#     return memory
+
 def save_recall_memory(memory: str, config: RunnableConfig) -> str:
-    """Save memory to vectorstore for later semantic retrieval."""
+    """Save memory only if consent is given."""
     username = get_username(config)
+    
+    # Check for data collection consent
+    if not check_consent(username, 'data_collection'):
+        return "Memory storage skipped (no consent)"
+    
     collection = get_vector_store()
     
+    # Save new memory
     collection.add(
         documents=[memory],
-        metadatas=[{"username": username}],
+        metadatas=[{
+            "username": username,
+            "type": "original",
+            "date": datetime.now().isoformat()
+        }],
         ids=[f"{username}_{str(uuid.uuid4())}"]
     )
+    
+    # Check if consolidation is needed
+    total_memories = list_all_memories(username)
+    total_tokens = sum(count_tokens(m['content']) for m in total_memories)
+    
+    if total_tokens > 8000:  # Threshold for consolidation
+        consolidate_memories(username)
+    
     return memory
 
+# @tool
+# def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
+#     """Search for relevant memories."""
+#     username = get_username(config)
+#     collection = get_vector_store()
+    
+#     query_results = collection.query(
+#         query_texts=[query],
+#         n_results=3,
+#         where={"username": username}
+#     )
+#     if len(query_results["documents"][0]) == 0:
+#         return []
+#     return [doc[0] for doc in query_results["documents"]]
 
 @tool
-def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
-    """Search for relevant memories."""
+def search_recall_memories(query: str, config: RunnableConfig, max_tokens: int = 4000) -> List[str]:
+    """Search for relevant memories, with token management."""
     username = get_username(config)
+    
+    # Check if consolidation is needed
+    total_memories = list_all_memories(username)
+    total_tokens = sum(count_tokens(m['content']) for m in total_memories)
+    
+    if total_tokens > max_tokens * 2:  # Add some buffer
+        consolidate_memories(username, max_tokens)
+    
     collection = get_vector_store()
     
-    query_results = collection.query(
+    # Get initial results
+    results = collection.query(
         query_texts=[query],
-        n_results=3,
+        n_results=5,  # Start with a reasonable number
         where={"username": username}
     )
-    if len(query_results["documents"][0]) == 0:
+    
+    if not results['documents'][0]:
         return []
-    return [doc[0] for doc in query_results["documents"]]
+    
+    # Process results while respecting token limit
+    memories = []
+    current_tokens = 0
+    
+    for doc in results['documents'][0]:
+        doc_tokens = count_tokens(doc)
+        if current_tokens + doc_tokens > max_tokens:
+            break
+        memories.append(doc)
+        current_tokens += doc_tokens
+    
+    return memories
     
 
-def get_vector_store():
-    """Get or create vector store instance"""
-    persist_directory = '/home/ubuntu/workspace/mids-capstone-fall2024-ai-art-tutor/streamlit'
+# def get_vector_store():
+#     """Get or create vector store instance"""
+#     persist_directory = '/home/ubuntu/workspace/mids-capstone-fall2024-ai-art-tutor/streamlit'
     
-    try:
-        # Create persist directory if it doesn't exist
-        os.makedirs(persist_directory, exist_ok=True)
+#     try:
+#         # Create persist directory if it doesn't exist
+#         os.makedirs(persist_directory, exist_ok=True)
         
-        # Initialize the embedding function
-        emb_fn = embedding_functions.OpenAIEmbeddingFunction(
-            api_key=os.environ["OPENAI_API_KEY"],
-            model_name="text-embedding-ada-002"
-        )
+#         # Initialize the embedding function
+#         emb_fn = embedding_functions.OpenAIEmbeddingFunction(
+#             api_key=os.environ["OPENAI_API_KEY"],
+#             model_name="text-embedding-ada-002"
+#         )
         
-        # Initialize the persistent client
-        client = chromadb.PersistentClient(path=persist_directory)
+#         # Initialize the persistent client
+#         client = chromadb.PersistentClient(path=persist_directory)
         
-        try:
-            # Try to get existing collection
-            collection = client.get_collection(
-                name="recall_vector_store",
-                embedding_function=emb_fn
-            )
-            print("Successfully connected to existing collection")
+#         try:
+#             # Try to get existing collection
+#             collection = client.get_collection(
+#                 name="recall_vector_store",
+#                 embedding_function=emb_fn
+#             )
+#             print("Successfully connected to existing collection")
             
-        except Exception as e:
-            # If collection doesn't exist, create new collection
-            print(f"Creating new collection due to: {str(e)}")
-            collection = client.create_collection(
-                name="recall_vector_store",
-                embedding_function=emb_fn
-            )
-            print("Successfully created new collection")
+#         except Exception as e:
+#             # If collection doesn't exist, create new collection
+#             print(f"Creating new collection due to: {str(e)}")
+#             collection = client.create_collection(
+#                 name="recall_vector_store",
+#                 embedding_function=emb_fn
+#             )
+#             print("Successfully created new collection")
         
-        return collection
+#         return collection
     
-    except Exception as e:
-        print(f"Critical error getting vector store: {str(e)}")
-        raise
+#     except Exception as e:
+#         print(f"Critical error getting vector store: {str(e)}")
+#         raise
 
 
 
