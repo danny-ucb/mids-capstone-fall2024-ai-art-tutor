@@ -1,13 +1,19 @@
-import openai
-import streamlit as st
-from streamlit_drawable_canvas import st_canvas
-from PIL import Image as PilImage
+# Standard library imports
 import os
-import bcrypt
 import json
 import random
-from app_pages.helpers import * 
 from datetime import datetime, timedelta
+
+# Third-party imports
+import bcrypt
+import openai
+import streamlit as st
+from PIL import Image as PilImage
+from streamlit_drawable_canvas import st_canvas
+
+# Local imports
+from helpers.general_helpers import *
+from helpers.api_keys import * 
 
 # Function to load and save credentials
 def load_credentials():
@@ -119,22 +125,35 @@ def login_page():
     inject_custom_css()
     st.title("Login")
     
+    # Initialize session state variables if they don't exist
+    if 'login_attempt' not in st.session_state:
+        st.session_state.login_attempt = False
+        
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
-    if st.button("Login"):
-        credentials = load_credentials()
-        if username in credentials:
-            hashed_password = credentials[username]['password']
-            if check_password(password, hashed_password.encode('utf-8')):
-                st.session_state['logged_in'] = True
-                st.session_state['username'] = username
-                st.session_state['parent_email'] = credentials[username]['parent_email']
-                st.success("Login successful!")
+    if st.button("Login") or st.session_state.login_attempt:
+        st.session_state.login_attempt = True
+        
+        if username and password:  # Only proceed if both fields are filled
+            credentials = load_credentials()
+            if username in credentials:
+                hashed_password = credentials[username]['password']
+                if check_password(password, hashed_password.encode('utf-8')):
+                    st.session_state['logged_in'] = True
+                    st.session_state['username'] = username
+                    st.session_state['parent_email'] = credentials[username]['parent_email']
+                    st.session_state.login_attempt = False  # Reset login attempt
+                    st.rerun()  # Force a rerun to update the page
+                else:
+                    st.error("Incorrect password.")
+                    st.session_state.login_attempt = False
             else:
-                st.error("Incorrect password.")
+                st.error("Username does not exist. Please register.")
+                st.session_state.login_attempt = False
         else:
-            st.error("Username does not exist. Please register.")
+            st.warning("Please enter both username and password.")
+            st.session_state.login_attempt = False
 
 
 def send_verification_email(sender, recipient, subject, verification_code, body_text=None, body_html=None):
