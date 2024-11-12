@@ -311,51 +311,59 @@ def parental_controls_page():
             You can modify these settings at any time or request complete data deletion.
             """)
         
+        # Initialize session state for consent form if not exists
+        if 'consent_form_submitted' not in st.session_state:
+            st.session_state.consent_form_submitted = False
+            
         # Load current consent settings
         consent_data = load_user_consent(st.session_state["username"])
+        
+        # Initialize consent settings in session state if not exists
+        if 'consent_settings' not in st.session_state:
+            st.session_state.consent_settings = {
+                "memory_collection": consent_data["memory_collection"],
+                "image_collection": consent_data["image_collection"],
+                "session_summaries": consent_data["session_summaries"],
+                "email_updates": consent_data["email_updates"]
+            }
         
         st.markdown("### Current Consent Settings")
         
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            # Memory Collection Consent
-            memory_collection = st.checkbox(
+            # Update session state directly when checkboxes change
+            st.session_state.consent_settings["memory_collection"] = st.checkbox(
                 "Memory Collection",
-                value=consent_data["memory_collection"],
+                value=st.session_state.consent_settings["memory_collection"],
                 help="Allow AI ArtBuddy to remember your child's art interests and previous conversations"
             )
             
-            # Image Collection Consent
-            image_collection = st.checkbox(
+            st.session_state.consent_settings["image_collection"] = st.checkbox(
                 "Image Collection",
-                value=consent_data["image_collection"],
+                value=st.session_state.consent_settings["image_collection"],
                 help="Save your child's artwork and AI-generated images for future sessions"
             )
             
-            # Session Summaries Consent
-            session_summaries = st.checkbox(
+            st.session_state.consent_settings["session_summaries"] = st.checkbox(
                 "Session Summaries",
-                value=consent_data["session_summaries"],
+                value=st.session_state.consent_settings["session_summaries"],
                 help="Save session records for review in the parent dashboard"
             )
             
-            # Email Updates Consent
-            email_updates = st.checkbox(
+            st.session_state.consent_settings["email_updates"] = st.checkbox(
                 "Email Updates",
-                value=consent_data["email_updates"],
+                value=st.session_state.consent_settings["email_updates"],
                 help="Receive email summaries about your child's art sessions"
             )
 
         # Save changes button
         if st.button("Save Consent Changes"):
             new_consent_data = {
-                "memory_collection": memory_collection,
-                "image_collection": image_collection,
-                "session_summaries": session_summaries,
-                "email_updates": email_updates,
+                **st.session_state.consent_settings,
                 "consent_date": consent_data.get("consent_date") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
+            save_user_consent(st.session_state["username"], new_consent_data)
             save_user_consent(st.session_state["username"], new_consent_data)
             st.success("Consent settings updated successfully!")
             
@@ -368,12 +376,11 @@ def parental_controls_page():
             {}
             {}
             """.format(
-                "• AI ArtBuddy will remember past conversations and preferences" if memory_collection else "• Past conversations won't be saved between sessions",
-                "• Artwork will be saved for future sessions" if image_collection else "• Artwork will only be available during the current session",
-                "• Session records will be saved in your dashboard" if session_summaries else "• Session records won't be kept",
-                "• You'll receive session summaries by email" if email_updates else "• You won't receive session summaries by email"
+                "• AI ArtBuddy will remember past conversations and preferences" if st.session_state.consent_settings["memory_collection"] else "• Past conversations won't be saved between sessions",
+                "• Artwork will be saved for future sessions" if st.session_state.consent_settings["image_collection"] else "• Artwork will only be available during the current session",
+                "• Session records will be saved in your dashboard" if st.session_state.consent_settings["session_summaries"] else "• Session records won't be kept",
+                "• You'll receive session summaries by email" if st.session_state.consent_settings["email_updates"] else "• You won't receive session summaries by email"
             ))
-
 
 
 

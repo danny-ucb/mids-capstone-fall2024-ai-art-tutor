@@ -192,63 +192,19 @@ def generate_image(query: str):
     return response.data[0].url
 
 
-# @tool
-# def save_recall_memory(memory: str, config: RunnableConfig) -> str:
-#     """Save memory to vectorstore for later semantic retrieval."""
-#     username = get_username(config)
-#     collection = get_vector_store()
-    
-#     collection.add(
-#         documents=[memory],
-#         metadatas=[{"username": username}],
-#         ids=[f"{username}_{str(uuid.uuid4())}"]
-#     )
-#     return memory
-
+@tool
 def save_recall_memory(memory: str, config: RunnableConfig) -> str:
-    """Save memory only if consent is given."""
+    """Save memory to vectorstore for later semantic retrieval."""
     username = get_username(config)
-    
-    # Check for data collection consent
-    if not check_consent(username, 'data_collection'):
-        return "Memory storage skipped (no consent)"
-    
     collection = get_vector_store()
-    
-    # Save new memory
-    collection.add(
-        documents=[memory],
-        metadatas=[{
-            "username": username,
-            "type": "original",
-            "date": datetime.now().isoformat()
-        }],
-        ids=[f"{username}_{str(uuid.uuid4())}"]
-    )
-    
-    # Check if consolidation is needed
-    total_memories = list_all_memories(username)
-    total_tokens = sum(count_tokens(m['content']) for m in total_memories)
-    
-    if total_tokens > 8000:  # Threshold for consolidation
-        consolidate_memories(username)
-    
+    if st.session_state.consent_settings["memory_collection"]:
+        collection.add(
+            documents=[memory],
+            metadatas=[{"username": username}],
+            ids=[f"{username}_{str(uuid.uuid4())}"]
+        )
     return memory
 
-# @tool
-# def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
-#     """Search for relevant memories."""
-#     username = get_username(config)
-#     collection = get_vector_store()
-    
-#     query_results = collection.query(
-#         query_texts=[query],
-#         n_results=3,
-#         where={"username": username}
-#     )
-#     if len(query_results["documents"][0]) == 0:
-#         return []
-#     return [doc[0] for doc in query_results["documents"]]
 
 @tool
 def search_recall_memories(query: str, config: RunnableConfig, max_tokens: int = 4000) -> List[str]:
@@ -286,48 +242,6 @@ def search_recall_memories(query: str, config: RunnableConfig, max_tokens: int =
         current_tokens += doc_tokens
     
     return memories
-    
-
-# def get_vector_store():
-#     """Get or create vector store instance"""
-#     persist_directory = '/home/ubuntu/workspace/mids-capstone-fall2024-ai-art-tutor/streamlit'
-    
-#     try:
-#         # Create persist directory if it doesn't exist
-#         os.makedirs(persist_directory, exist_ok=True)
-        
-#         # Initialize the embedding function
-#         emb_fn = embedding_functions.OpenAIEmbeddingFunction(
-#             api_key=os.environ["OPENAI_API_KEY"],
-#             model_name="text-embedding-ada-002"
-#         )
-        
-#         # Initialize the persistent client
-#         client = chromadb.PersistentClient(path=persist_directory)
-        
-#         try:
-#             # Try to get existing collection
-#             collection = client.get_collection(
-#                 name="recall_vector_store",
-#                 embedding_function=emb_fn
-#             )
-#             print("Successfully connected to existing collection")
-            
-#         except Exception as e:
-#             # If collection doesn't exist, create new collection
-#             print(f"Creating new collection due to: {str(e)}")
-#             collection = client.create_collection(
-#                 name="recall_vector_store",
-#                 embedding_function=emb_fn
-#             )
-#             print("Successfully created new collection")
-        
-#         return collection
-    
-#     except Exception as e:
-#         print(f"Critical error getting vector store: {str(e)}")
-#         raise
-
 
 
 def create_nodes(openai_key):

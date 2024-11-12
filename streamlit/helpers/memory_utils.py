@@ -202,13 +202,13 @@ def save_session_summary():
     }
     
     # Save session data if consent is given
-    if check_consent(st.session_state["username"], 'session_summaries'):
+    if st.session_state.consent_settings["session_summaries"]:
         session_data = load_session_data(st.session_state["username"])
         session_data.append(session_summary)
         save_session_data(st.session_state['username'], session_data)
     
     # Send email if email updates consent is given
-    if check_consent(st.session_state["username"], 'email_updates'):
+    if st.session_state.consent_settings["email_updates"]:
         send_session_summary_email(
             sender="aiartbuddy@gmail.com",
             recipient=st.session_state['parent_email'],
