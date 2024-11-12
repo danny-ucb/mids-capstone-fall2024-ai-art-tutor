@@ -49,7 +49,7 @@ def registration_page():
         st.session_state.verification_code = None
     if 'registration_step' not in st.session_state:
         st.session_state.registration_step = 'initial'
-    
+
     # Form inputs
     username = st.text_input("Enter a Username")
     email = st.text_input("Enter a Parent's Email")

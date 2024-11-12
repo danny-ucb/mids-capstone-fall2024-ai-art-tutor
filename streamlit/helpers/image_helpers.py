@@ -73,7 +73,7 @@ def save_uploaded_image(uploaded_file):
         
     try:
         # Check for image collection consent
-        if not check_consent(st.session_state['username'], 'image_collection'):
+        if not st.session_state.consent_settings["image_collection"]:
             # Create temp directory if it doesn't exist
             temp_dir = "temp_session_files"
             if not os.path.exists(temp_dir):

@@ -1,23 +1,35 @@
-import openai
-import streamlit as st
-from streamlit_drawable_canvas import st_canvas
-from PIL import Image as PilImage
+#Streamlit_app.py
+# Standard library imports
 import os
-from helpers.api_keys import get_keys
-from helpers.multi_agent import *
-from app_pages.helpers import inject_custom_css
-from app_pages.parental_controls import * 
-from app_pages.login_registration_page import * 
+import uuid
 from datetime import datetime
+
+# Third-party imports
+import openai
 import pytz
+import streamlit as st
+from PIL import Image as PilImage
+from streamlit_drawable_canvas import st_canvas
+
+# Database
 import chromadb
 from chromadb.utils import embedding_functions
-import uuid
+
+# Local application imports
+from helpers.api_keys import get_keys
+from helpers.multi_agent import *
+from helpers.general_helpers import *
+from helpers.image_helpers import * 
+from helpers.memory_utils import * 
+from app_pages.parental_controls import *
+from app_pages.login_registration_page import *
+
 timezone = pytz.timezone("America/New_York")
 
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
+        
 
 if not st.session_state['logged_in']:
     intro_page()
@@ -39,16 +51,59 @@ else:
     # Main application for logged-in users
     openai_key = get_keys()
     inject_custom_css()
+    # Initialize hide_safety_message in session state if it doesn't exist
+    if 'hide_safety_message' not in st.session_state:
+        st.session_state['hide_safety_message'] = False
     
     # page = st.sidebar.selectbox("Select a page", ["Home", "Parental Controls"])
     main_page, parental_controls = st.tabs(["Home", "Parental Controls"])
     
     if 'graph' not in st.session_state:
         st.session_state['graph'] = create_nodes(openai_key)
+
+            # Load current consent settings
+    consent_data = load_user_consent(st.session_state["username"])
+    
+    # Initialize consent settings in session state if not exists
+    if 'consent_settings' not in st.session_state:
+        st.session_state.consent_settings = {
+            "memory_collection": consent_data["memory_collection"],
+            "image_collection": consent_data["image_collection"],
+            "session_summaries": consent_data["session_summaries"],
+            "email_updates": consent_data["email_updates"]
+        }
+        
     with main_page:
 
         # App title and description
         st.title("🎨 AI ArtBuddy")
+        # Safety message with hide button
+        if not st.session_state['hide_safety_message']:
+            col1, col2 = st.columns([20, 1])
+            with col1:
+                st.markdown("""
+                <div style="
+                    padding: 20px;
+                    border-radius: 10px;
+                    background-color: #E8F5E9;
+                    margin-bottom: 20px;
+                    border: 2px solid #81C784;
+                    font-family: 'Comic Sans MS', cursive, sans-serif;
+                ">
+                    <p style="
+                        color: #2E7D32;
+                        margin: 0;
+                        font-size: 1.1em;
+                    ">
+                        👋 Hi! We want to make sure you're having fun and staying safe. To help with that, your parent or guardian will be able to see the art you create and our conversations, so they know what you're doing and can help if you need it!
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+            with col2:
+                if st.button("✕", help="Hide message"):
+                    st.session_state['hide_safety_message'] = True
+                    st.rerun()
+        
         st.subheader("Let's Draw!")
         st.write("Ask me anything about art and drawing! I'm here to help you learn and have fun. 😊")
         
@@ -62,22 +117,19 @@ else:
         
         # File uploader for image input
         uploaded_image = st.file_uploader("Upload your artwork (optional):", type=["png", "jpg", "jpeg"])
-        
-        # Handle image upload
+                
         if uploaded_image is not None:
-            # Save image and update session state
-            save_dir = "uploaded_images"
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-            
-            save_path = os.path.join(save_dir, uploaded_image.name)
-            with open(save_path, "wb") as f:
-                f.write(uploaded_image.getbuffer())
-            
-            st.session_state['current_image'] = save_path
-            st.image(uploaded_image, caption="Your uploaded artwork", width=200)
-            # image_moderator_result = image_moderation(openai_key, image_path=save_path)
-        
+            # Check if this is a new upload
+            if 'last_uploaded_image' not in st.session_state or st.session_state['last_uploaded_image'] != uploaded_image.name:
+                save_path = save_uploaded_image(uploaded_image)
+                if save_path:
+                    st.session_state['current_image'] = save_path
+                    st.session_state['last_uploaded_image'] = uploaded_image.name  # Store the filename to track uploads
+                    st.image(uploaded_image, caption="Your uploaded artwork", width=200)
+            else:
+                # If it's the same image, just display it
+                st.image(uploaded_image, caption="Your uploaded artwork", width=200)       
+                
         # Start Chat button
         if not st.session_state['chat_active']:
             if st.button("💬 Start Chat!"):
@@ -104,31 +156,50 @@ else:
                                 img_file_path = f"produced_images/AI_generated_image_{generate_random_string(10)}.png"
                                 download_image_requests(url=content, file_name=img_file_path)
                                 st.write(f'🎨 **ArtBuddy:** Here\'s what I drew for you:')
-                                st.image(img_file_path, width = 300) 
+                                st.image(img_file_path, width = 200) 
                             else:
                                 st.write(f'🎨 **ArtBuddy:** {content}')
 
             
             # Create a spacer
             st.markdown("<br>", unsafe_allow_html=True)
-            
+
             # Input area in the second container
             with input_container:
-                # Chat input
-                user_input = st.text_input("Type your message here:", key="user_input", value = "")
-                
-                # Buttons in columns
-                
-                col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+
+                # Initialize session state variables
+                if "submit_pressed" not in st.session_state:
+                    st.session_state.submit_pressed = False
+                if 'temp_input' not in st.session_state:
+                    st.session_state.temp_input = ""
+                if 'input_key' not in st.session_state:
+                    st.session_state.input_key = 0
+                    
+                # Initialize the current dynamic input key in session state
+                current_key = f"user_input_{st.session_state.input_key}"
+                if current_key not in st.session_state:
+                    st.session_state[current_key] = ""
+            
+                def handle_submit():
+                    if st.session_state[current_key]:  # Now we can safely check this
+                        st.session_state.submit_pressed = True
+                        st.session_state.temp_input = st.session_state[current_key]
+                        
+                user_input = st.text_input(
+                    "Type your message here:",
+                    key=current_key,
+                    on_change=handle_submit
+                )
+               
+                col1, col2, col3 = st.columns([1, 1, 1])
                 col = st.columns([1]) 
-                # Send button
-                with col1:
-                    send_pressed = st.button("Send", key="send_button")
-                
                 # Clear chat button
-                with col2:
+                with col1:
                     clear_pressed = st.button("Clear Chat")
                     
+                with col2:
+                    end_session_pressed = st.button("End Session")
+
                 # Download button
                 with col3:
                     if st.session_state['messages']:
@@ -143,19 +214,24 @@ else:
                             file_name="art_buddy_chat.txt",
                             mime="text/plain"
                         )
+            
+                # Process input when either Enter is pressed or Send button is clicked
+                if st.session_state.submit_pressed and st.session_state.temp_input:
+                    current_input = st.session_state.temp_input
+                    
+                    # Reset states
+                    st.session_state.submit_pressed = False
+                    st.session_state.temp_input = ""
+                    st.session_state.input_key += 1
 
-                with col4:
-                    end_session_pressed = st.button("End Session")
-
-                
-                if send_pressed and user_input:
                     
                     # Add user message to history
                     st.session_state['messages'].append({
                         "role": "user",
-                        "content": user_input, 
+                        "content": current_input, 
                         "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
                     })
+
 
                     # Get AI response
                     thread_config = {"configurable": {"username": st.session_state['username'], "thread_id": "1"}}
@@ -165,14 +241,14 @@ else:
                         if st.session_state['current_image']:
                             response = stream_messages(
                                 st.session_state['graph'],
-                                text=user_input,
+                                text=current_input,
                                 thread=thread_config,
                                 image_path=st.session_state['current_image']
                             )
                         else:
                             response = stream_messages(
                                 st.session_state['graph'],
-                                text=user_input,
+                                text=current_input,
                                 thread=thread_config
                             )
                         
@@ -203,8 +279,11 @@ else:
                                     "content": content, 
                                     "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
                                 })
-                        
-                        # Rerun to update the chat display
+                                
+                        # Initialize next key before rerun
+                        next_key = f"user_input_{st.session_state.input_key}"
+                        if next_key not in st.session_state:
+                            st.session_state[next_key] = ""
                         st.experimental_rerun()
                         
                     except Exception as e:
@@ -216,12 +295,11 @@ else:
 
                 if end_session_pressed:
                     save_session_summary()
+                    cleanup_temp_files()  
                     st.session_state['messages'] = []
                     st.experimental_rerun()
                     
 
-    
-    # elif page == "Parental Controls":
     with parental_controls:
         
         # Call the function to display the parental controls page
