@@ -75,7 +75,6 @@ def agent_node(state, agent, name):
     # Only use the last 5 messages for each node
     recent_messages = state["messages"][-5:]
     
-    # Get the last 5 memories
     relevant_memories = state["recall_memories"]
     recall_str = (
         "<recall_memory>\n" + "\n".join(relevant_memories) + "\n</recall_memory>"
@@ -87,16 +86,16 @@ def agent_node(state, agent, name):
     })
 
     # Handle image removal from the last message
-    last_msg = recent_messages[-1]
-    if hasattr(last_msg, 'content'):
-        if isinstance(last_msg.content, list):
-            text_content = ""
-            for content_item in last_msg.content:
-                if isinstance(content_item, dict) and content_item.get("type") == "text":
-                    text_content = content_item.get("text", "")
-                    break
-            state["messages"][-1] = HumanMessage(content=text_content)
-            print("Image removed after usage")
+    # last_msg = recent_messages[-1]
+    # if hasattr(last_msg, 'content'):
+    #     if isinstance(last_msg.content, list):
+    #         text_content = ""
+    #         for content_item in last_msg.content:
+    #             if isinstance(content_item, dict) and content_item.get("type") == "text":
+    #                 text_content = content_item.get("text", "")
+    #                 break
+    #         state["messages"][-1] = HumanMessage(content=text_content)
+    #         print("Image removed after usage")
 
     return {"messages": [result]}
 
