@@ -10,6 +10,7 @@ from typing import Annotated, List, Sequence, TypedDict
 import chromadb
 from chromadb.utils import embedding_functions
 import uuid
+import datetime
 
 #Other Scripts
 from helpers.general_helpers import *
@@ -58,7 +59,6 @@ from langgraph.prebuilt import ToolNode
 
 
 
-
 # The agent state is the input to each node in the graph
 class AgentState(TypedDict):
     # The annotation tells the graph that new messages will always
@@ -69,18 +69,37 @@ class AgentState(TypedDict):
     next: str
     is_appropriate: bool
     moderator_response: str
+    window_size: int = 5
 
 def agent_node(state, agent, name):
-    #print(f"Config input: {config}")
-    # create tagging for memory
+    # Only use the last 5 messages for each node
+    recent_messages = state["messages"][-5:]
+    
+    # Get the last 5 memories
+    relevant_memories = state["recall_memories"]
     recall_str = (
-        "<recall_memory>\n" + "\n".join(state["recall_memories"]) + "\n</recall_memory>"
+        "<recall_memory>\n" + "\n".join(relevant_memories) + "\n</recall_memory>"
     )
+
     result = agent.invoke({
-        "messages": state["messages"],
+        "messages": recent_messages,
         "recall_memories": recall_str,
     })
+
+    # Handle image removal from the last message
+    last_msg = recent_messages[-1]
+    if hasattr(last_msg, 'content'):
+        if isinstance(last_msg.content, list):
+            text_content = ""
+            for content_item in last_msg.content:
+                if isinstance(content_item, dict) and content_item.get("type") == "text":
+                    text_content = content_item.get("text", "")
+                    break
+            state["messages"][-1] = HumanMessage(content=text_content)
+            print("Image removed after usage")
+
     return {"messages": [result]}
+
 
 
 def create_agent(openai_key:str, 
@@ -126,6 +145,13 @@ def load_memories(state: AgentState, config: RunnableConfig) -> AgentState:
     Returns:
         State: The updated state with loaded memories.
     """
+    consent_settings = config["configurable"].get("consent_settings", {})
+    
+    # Check if memory collection is allowed
+    if not consent_settings.get("memory_collection", False):
+        return {
+            "recall_memories": [],
+        }    
     convo_str = get_buffer_string(state["messages"])
     convo_str = tokenizer.decode(tokenizer.encode(convo_str)[:2048])
     recall_memories = search_recall_memories.invoke(convo_str, config)
@@ -191,57 +217,82 @@ def generate_image(query: str):
     )
     return response.data[0].url
 
-
 @tool
 def save_recall_memory(memory: str, config: RunnableConfig) -> str:
     """Save memory to vectorstore for later semantic retrieval."""
     username = get_username(config)
+    consent_settings = config["configurable"].get("consent_settings", {})
+    
+    # Check if memory collection is allowed
+    if not consent_settings.get("memory_collection", False):
+        return memory
+    
     collection = get_vector_store()
-    if st.session_state.consent_settings["memory_collection"]:
-        collection.add(
-            documents=[memory],
-            metadatas=[{"username": username}],
-            ids=[f"{username}_{str(uuid.uuid4())}"]
-        )
+
+    collection.add(
+        documents=[memory],
+        metadatas=[{"username": username}],
+        ids=[f"{username}_{str(uuid.uuid4())}"]
+    )
     return memory
 
 
 @tool
-def search_recall_memories(query: str, config: RunnableConfig, max_tokens: int = 4000) -> List[str]:
-    """Search for relevant memories, with token management."""
+def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
+    """Search for relevant memories."""
     username = get_username(config)
+    consent_settings = config["configurable"].get("consent_settings", {})
     
-    # Check if consolidation is needed
-    total_memories = list_all_memories(username)
-    total_tokens = sum(count_tokens(m['content']) for m in total_memories)
-    
-    if total_tokens > max_tokens * 2:  # Add some buffer
-        consolidate_memories(username, max_tokens)
-    
+    # # Check if memory collection is allowed
+    # if not consent_settings.get("memory_collection", False):
+    #     return []
     collection = get_vector_store()
     
-    # Get initial results
-    results = collection.query(
+    query_results = collection.query(
         query_texts=[query],
-        n_results=5,  # Start with a reasonable number
+        n_results=15,
         where={"username": username}
     )
-    
-    if not results['documents'][0]:
+    if len(query_results["documents"][0]) == 0:
         return []
+    return [doc[0] for doc in query_results["documents"]]
+
+# @tool
+# def search_recall_memories(query: str, config: RunnableConfig, max_tokens: int = 4000) -> List[str]:
+#     """Search for relevant memories, with token management."""
+#     username = get_username(config)
     
-    # Process results while respecting token limit
-    memories = []
-    current_tokens = 0
+#     # Check if consolidation is needed
+#     total_memories = list_all_memories(username)
+#     total_tokens = sum(count_tokens(m['content']) for m in total_memories)
     
-    for doc in results['documents'][0]:
-        doc_tokens = count_tokens(doc)
-        if current_tokens + doc_tokens > max_tokens:
-            break
-        memories.append(doc)
-        current_tokens += doc_tokens
+#     if total_tokens > max_tokens * 2:  # Add some buffer
+#         consolidate_memories(username, max_tokens)
     
-    return memories
+#     collection = get_vector_store()
+    
+#     # Get initial results
+#     results = collection.query(
+#         query_texts=[query],
+#         n_results=5,  # Start with a reasonable number
+#         where={"username": username}
+#     )
+    
+#     if not results['documents'][0]:
+#         return []
+    
+#     # Process results while respecting token limit
+#     memories = []
+#     current_tokens = 0
+    
+#     for doc in results['documents'][0]:
+#         doc_tokens = count_tokens(doc)
+#         if current_tokens + doc_tokens > max_tokens:
+#             break
+#         memories.append(doc)
+#         current_tokens += doc_tokens
+    
+#     return memories
 
 
 def create_nodes(openai_key):
@@ -484,8 +535,85 @@ def download_image_requests(url, file_name):
     else:
         pass
 
-def stream_messages(graph, text: str, thread: dict, image_path: str= None):
+def get_relevant_history(messages: List[Dict], window_size: int = 5) -> List[Dict]:
+    """Get most relevant conversation history, keeping the first message for context
+    and the last few messages for recent context."""
+    if len(messages) <= window_size:
+        return messages
+        
+    # Always keep the first message for context
+    first_message = messages[0]
+    # Get the last n-1 messages (since we're keeping the first one)
+    recent_messages = messages[-window_size+1:]
+    
+    return [first_message] + recent_messages
 
+def convert_to_langchain_messages(messages: List[Dict]) -> List[BaseMessage]:
+    """Convert dictionary messages to LangChain BaseMessage objects."""
+    converted_messages = []
+    for msg in messages:
+        if msg['role'] == 'user':
+            converted_messages.append(HumanMessage(content=msg['content']))
+        elif msg['role'] == 'assistant':
+            converted_messages.append(AIMessage(content=msg['content']))
+    return converted_messages
+
+
+def truncate_messages(messages: List[Dict], max_length: int = 2000) -> List[Dict]:
+    """Truncate messages to stay within OpenAI's limits while preserving context."""
+    if not messages:
+        return []
+        
+    # Always keep the first message for context
+    initial_message = messages[0]
+    current_length = len(str(initial_message))
+    
+    # Start from the most recent messages and work backwards
+    recent_messages = []
+    for msg in reversed(messages[1:]):  # Skip the first message
+        msg_length = len(str(msg))
+        if current_length + msg_length < max_length:
+            recent_messages.insert(0, msg)  # Insert at beginning to maintain order
+            current_length += msg_length
+        else:
+            break
+    
+    return [initial_message] + recent_messages
+
+## Original & Working
+# def stream_messages(graph, text: str, thread: dict, image_path: str= None):
+
+#     # Initialize the content with the text message
+#     content = [{"type": "text", "text": text}]
+
+#     # If image_url is provided, append the image content
+#     if image_path:
+#         base64_image = encode_image(image_path)
+#         content.append({
+#             "type": "image_url",
+#             "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+#         })
+
+#     # Define the input for the graph stream
+#     input_data = {
+#         "messages": [
+#             HumanMessage(content=content)
+#         ]
+#     }
+
+#         # Initialize a variable to store the final output message
+#     final_message = ""
+
+#     # Stream the graph and capture only the final message output
+#     for s in graph.stream(input_data, config=thread):
+#         if "__end__" not in s:
+#             # Capture the most recent message (final one)
+#             final_message = s
+    
+#     return(final_message)
+
+# Version 1
+def stream_messages(graph, text: str, thread: dict, image_path: str = None):
     # Initialize the content with the text message
     content = [{"type": "text", "text": text}]
 
@@ -497,20 +625,27 @@ def stream_messages(graph, text: str, thread: dict, image_path: str= None):
             "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
         })
 
+    # Get the windowed message history and convert to LangChain format
+    if 'messages' in st.session_state:
+        history_messages = get_relevant_history(st.session_state['messages'])
+        current_messages = convert_to_langchain_messages(history_messages)
+    else:
+        current_messages = []
+
+    # Add the new message
+    input_messages = current_messages + [HumanMessage(content=content)]
+
     # Define the input for the graph stream
     input_data = {
-        "messages": [
-            HumanMessage(content=content)
-        ]
+        "messages": input_messages
     }
 
-        # Initialize a variable to store the final output message
+    # Initialize a variable to store the final output message
     final_message = ""
 
     # Stream the graph and capture only the final message output
     for s in graph.stream(input_data, config=thread):
         if "__end__" not in s:
-            # Capture the most recent message (final one)
             final_message = s
     
-    return(final_message)
+    return final_message

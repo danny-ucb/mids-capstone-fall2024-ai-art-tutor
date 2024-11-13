@@ -78,106 +78,106 @@ def get_vector_store():
         print(f"Critical error getting vector store: {str(e)}")
         raise
 
-def get_memory_clusters(memories: List[Dict], similarity_threshold: float = 0.85) -> List[List[Dict]]:
-    """Group related memories together based on embedding similarity."""
-    collection = get_vector_store()
-    clusters = []
-    used_memories = set()
+# def get_memory_clusters(memories: List[Dict], similarity_threshold: float = 0.85) -> List[List[Dict]]:
+#     """Group related memories together based on embedding similarity."""
+#     collection = get_vector_store()
+#     clusters = []
+#     used_memories = set()
 
-    for i, memory in enumerate(memories):
-        if memory['id'] in used_memories:
-            continue
+#     for i, memory in enumerate(memories):
+#         if memory['id'] in used_memories:
+#             continue
 
-        # Create a cluster starting with this memory
-        cluster = [memory]
-        used_memories.add(memory['id'])
+#         # Create a cluster starting with this memory
+#         cluster = [memory]
+#         used_memories.add(memory['id'])
 
-        # Find similar memories using the vector store
-        similar_results = collection.query(
-            query_texts=[memory['content']],
-            n_results=len(memories),  # Get all potential matches
-            where={"username": memory['metadata']['username']}
-        )
+#         # Find similar memories using the vector store
+#         similar_results = collection.query(
+#             query_texts=[memory['content']],
+#             n_results=len(memories),  # Get all potential matches
+#             where={"username": memory['metadata']['username']}
+#         )
 
-        # Add similar memories to cluster
-        for j, (similar_id, distance) in enumerate(zip(similar_results['ids'][0], similar_results['distances'][0])):
-            if similar_id not in used_memories and distance <= similarity_threshold:
-                similar_memory = next((m for m in memories if m['id'] == similar_id), None)
-                if similar_memory:
-                    cluster.append(similar_memory)
-                    used_memories.add(similar_id)
+#         # Add similar memories to cluster
+#         for j, (similar_id, distance) in enumerate(zip(similar_results['ids'][0], similar_results['distances'][0])):
+#             if similar_id not in used_memories and distance <= similarity_threshold:
+#                 similar_memory = next((m for m in memories if m['id'] == similar_id), None)
+#                 if similar_memory:
+#                     cluster.append(similar_memory)
+#                     used_memories.add(similar_id)
 
-        clusters.append(cluster)
+#         clusters.append(cluster)
 
-    return clusters
+#     return clusters
 
-def summarize_memory_cluster(cluster: List[Dict]) -> str:
-    """Summarize a cluster of related memories."""
-    llm = ChatOpenAI(model="gpt-3.5-turbo")  # Using 3.5 to save tokens
+# def summarize_memory_cluster(cluster: List[Dict]) -> str:
+#     """Summarize a cluster of related memories."""
+#     llm = ChatOpenAI(model="gpt-3.5-turbo")  # Using 3.5 to save tokens
     
-    prompt_template = """
-    Below are several related memories from interactions with a user. 
-    Please create a concise summary that preserves the key information and patterns while reducing length.
-    Focus on recurring themes, preferences, and important details.
+#     prompt_template = """
+#     Below are several related memories from interactions with a user. 
+#     Please create a concise summary that preserves the key information and patterns while reducing length.
+#     Focus on recurring themes, preferences, and important details.
 
-    Memories:
-    {memories}
+#     Memories:
+#     {memories}
 
-    Summary (be concise):
-    """
+#     Summary (be concise):
+#     """
     
-    prompt = PromptTemplate(
-        input_variables=["memories"],
-        template=prompt_template,
-    )
+#     prompt = PromptTemplate(
+#         input_variables=["memories"],
+#         template=prompt_template,
+#     )
     
-    # Prepare memories text
-    memories_text = "\n---\n".join([f"Memory {i+1}: {m['content']}" 
-                                   for i, m in enumerate(cluster)])
+#     # Prepare memories text
+#     memories_text = "\n---\n".join([f"Memory {i+1}: {m['content']}" 
+#                                    for i, m in enumerate(cluster)])
     
-    # Create and run the chain
-    chain = LLMChain(llm=llm, prompt=prompt)
-    summary = chain.run(memories=memories_text)
+#     # Create and run the chain
+#     chain = LLMChain(llm=llm, prompt=prompt)
+#     summary = chain.run(memories=memories_text)
     
-    return summary.strip()
+#     return summary.strip()
 
-def consolidate_memories(username: str, max_token_target: int = 6000) -> None:
-    """Consolidate memories when they exceed token limit."""
-    collection = get_vector_store()
+# def consolidate_memories(username: str, max_token_target: int = 6000) -> None:
+#     """Consolidate memories when they exceed token limit."""
+#     collection = get_vector_store()
     
-    # Get all memories for user
-    memories = list_all_memories(username)
+#     # Get all memories for user
+#     memories = list_all_memories(username)
     
-    # Calculate total tokens
-    total_tokens = sum(count_tokens(m['content']) for m in memories)
+#     # Calculate total tokens
+#     total_tokens = sum(count_tokens(m['content']) for m in memories)
     
-    if total_tokens > max_token_target:
-        # Group related memories
-        clusters = get_memory_clusters(memories)
+#     if total_tokens > max_token_target:
+#         # Group related memories
+#         clusters = get_memory_clusters(memories)
         
-        # Process each cluster
-        for cluster in clusters:
-            if len(cluster) > 1:  # Only summarize clusters with multiple memories
-                # Create summary
-                summary = summarize_memory_cluster(cluster)
+#         # Process each cluster
+#         for cluster in clusters:
+#             if len(cluster) > 1:  # Only summarize clusters with multiple memories
+#                 # Create summary
+#                 summary = summarize_memory_cluster(cluster)
                 
-                # Delete old memories
-                old_ids = [m['id'] for m in cluster]
-                collection.delete(ids=old_ids)
+#                 # Delete old memories
+#                 old_ids = [m['id'] for m in cluster]
+#                 collection.delete(ids=old_ids)
                 
-                # Save consolidated memory
-                collection.add(
-                    documents=[summary],
-                    metadatas=[{
-                        "username": username,
-                        "type": "consolidated",
-                        "original_count": len(cluster),
-                        "consolidated_date": datetime.now().isoformat(),
-                        "oldest_memory_date": min(m['metadata'].get('date', datetime.now().isoformat()) 
-                                                for m in cluster)
-                    }],
-                    ids=[f"{username}_consolidated_{str(uuid.uuid4())}"]
-                )
+#                 # Save consolidated memory
+#                 collection.add(
+#                     documents=[summary],
+#                     metadatas=[{
+#                         "username": username,
+#                         "type": "consolidated",
+#                         "original_count": len(cluster),
+#                         "consolidated_date": datetime.now().isoformat(),
+#                         "oldest_memory_date": min(m['metadata'].get('date', datetime.now().isoformat()) 
+#                                                 for m in cluster)
+#                     }],
+#                     ids=[f"{username}_consolidated_{str(uuid.uuid4())}"]
+#                 )
 
 
 def save_session_summary():
@@ -580,3 +580,5 @@ def send_session_summary_email(sender, recipient, subject, session_details, body
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return None
+
+
