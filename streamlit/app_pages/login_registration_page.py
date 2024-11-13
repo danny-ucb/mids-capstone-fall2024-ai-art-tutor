@@ -181,88 +181,102 @@ def send_verification_email(sender, recipient, subject, verification_code, body_
     default_body_text = f"Your verification code for AI Art Buddy is: {verification_code}\n\n"
     # default_body_html = f"""
     default_body_html = f"""
-    <html>
-        <head>
-            <style>
-                /* General styling */
-                body {{
-                    font-family: Arial, sans-serif;
-                    background-color: #f4f4f9;
-                    color: #333333;
-                    margin: 0;
-                    padding: 0;
-                }}
-                .container {{
-                    width: 100%;
-                    padding: 20px;
-                    background-color: #ffffff;
-                    border-radius: 8px;
-                    box-shadow: 0px 0px 15px rgba(0, 0, 0, 0.1);
-                }}
-                .header {{
-                    background-color: #3b5998;
-                    color: white;
-                    padding: 10px;
-                    text-align: center;
-                    border-top-left-radius: 8px;
-                    border-top-right-radius: 8px;
-                }}
-                .header h1 {{
-                    margin: 0;
-                }}
-                .content {{
-                    padding: 20px;
-                    text-align: center;
-                }}
-                .verification-code {{
-                    font-size: 24px;
-                    font-weight: bold;
-                    color: #ff6347;
-                    margin: 10px 0;
-                }}
-                .footer {{
-                    margin-top: 30px;
-                    font-size: 12px;
-                    color: #999999;
-                    text-align: center;
-                }}
-                .coppa-info {{
-                    text-align: left;
-                    font-size: 14px;
-                    color: #555555;
-                    margin-top: 20px;
-                    padding-top: 20px;
-                    border-top: 1px solid #dddddd;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>Welcome to AI Art Buddy!</h1>
+        <html>
+            <head>
+                <style>
+                    /* General styling */
+                    body {{
+                        font-family: Arial, sans-serif;
+                        background-color: #f4f4f9;
+                        color: #333333;
+                        margin: 0;
+                        padding: 0;
+                    }}
+                    .container {{
+                        width: 100%;
+                        padding: 20px;
+                        background-color: #ffffff;
+                        border-radius: 8px;
+                        box-shadow: 0px 0px 15px rgba(0, 0, 0, 0.1);
+                    }}
+                    .header {{
+                        background-color: #3b5998;
+                        color: white;
+                        padding: 10px;
+                        text-align: center;
+                        border-top-left-radius: 8px;
+                        border-top-right-radius: 8px;
+                    }}
+                    .header h1 {{
+                        margin: 0;
+                    }}
+                    .content {{
+                        padding: 20px;
+                        text-align: center;
+                    }}
+                    .verification-code {{
+                        font-size: 24px;
+                        font-weight: bold;
+                        color: #ff6347;
+                        margin: 10px 0;
+                    }}
+                    .footer {{
+                        margin-top: 30px;
+                        font-size: 12px;
+                        color: #999999;
+                        text-align: center;
+                    }}
+                    .coppa-info {{
+                        text-align: left;
+                        font-size: 14px;
+                        color: #555555;
+                        margin-top: 20px;
+                        padding-top: 20px;
+                        border-top: 1px solid #dddddd;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>Welcome to AI Art Buddy!</h1>
+                    </div>
+                    <div class="content">
+                        <p>Thank you for signing up!</p>
+                        <p>Your verification code is:</p>
+                        <p class="verification-code">{verification_code}</p>
+                        <p>Please review the parental consent information below. By entering the verification code, you confirm your consent to complete the sign-up process.</p>
+                    </div>
+                    <div class="coppa-info">
+                        <h2>Parental Consent Required</h2>
+                        <p>We're committed to protecting the privacy of your child. In compliance with the Children's Online Privacy Protection Act (COPPA), we require parental consent for children under 13 to use our services. Please carefully review our Terms of Service below:</p>
+                        
+                        <h3>Data Collected</h3>
+                        <p>To provide a personalized art learning experience, we collect the following information from your child:</p>
+                        <ul>
+                            <li><strong>Account Information:</strong> A username/name and their age, to personalize the app's responses and create a profile.</li>
+                            <li><strong>Artwork:</strong> Images created and uploaded by your child. This data is used <em>only</em> to provide feedback and support their artistic development. It is not used for any other purposes.</li>
+                            <li><strong>Parental Contact Information:</strong> Your email address is required to confirm your consent and to contact you regarding your child's account.</li>
+                        </ul>
+    
+                        <h3>Your Rights</h3>
+                        <p>As a parent/guardian, you have the right to:</p>
+                        <ul>
+                            <li><strong>Access:</strong> View your child's data.</li>
+                            <li><strong>Delete:</strong> Request the deletion of your child's data at any time.</li>
+                            <li><strong>Withdraw Consent:</strong> Revoke your consent to the collection and use of your child's data.</li>
+                        </ul>
+    
+                        <p>To exercise any of these rights, please contact us at aiartbuddy@gmail.com. We appreciate your cooperation in ensuring your child's online safety.</p>
+                        
+                        <p><em>Disclosure: To exercise any of these rights, please contact us at aiartbuddy@gmail.com. We want to be transparent about how your child's data is handled. While we take every precaution to protect their privacy, some data processing occurs through OpenAI's services, governed by their own privacy policy, which you can review here: https://openai.com/policies/row-privacy-policy. We encourage you to review this policy.</em></p>
+                    </div>
+                    <div class="footer">
+                        <p>&copy; 2024 AI ArtBuddy. All rights reserved.</p>
+                    </div>
                 </div>
-                <div class="content">
-                    <p>Thank you for signing up!</p>
-                    <p>Your verification code is:</p>
-                    <p class="verification-code">{verification_code}</p>
-                    <p>Please review the parental consent information below. By entering the verification code, you confirm your consent to complete the sign-up process.</p>
-                </div>
-                <div class="coppa-info">
-                    <h2>Parental Consent Required</h2>
-                    <p>In compliance with the Children's Online Privacy Protection Act (COPPA), we require parental consent for children under 13 to use our services. As part of the registration process, we collect the following information:</p>
-                    <ul>
-                        <li><strong>Account Information:</strong> Your child’s username and age, used to personalize their experience.</li>
-                        <li><strong>Artwork Uploads:</strong> Images uploaded by your child, solely for the purpose of providing art feedback.</li>
-                        <li><strong>Parental Contact:</strong> This email address, used to communicate important information regarding your child’s account and consent verification.</li>
-                    </ul>
-                    <p>As a parent, you have the right to review and delete your child’s information at any time. If you have questions or wish to modify your consent, please contact us at aiartbuddy@gmail.com.</p>
-                </div>
-                <div class="footer">
-                    <p>&copy; 2024 AI ArtBuddy. All rights reserved.</p>
-                </div>
-            </div>
-        </body>
-    </html>
+            </body>
+        </html>
     """
     
     # Use provided body if available, otherwise use defaults

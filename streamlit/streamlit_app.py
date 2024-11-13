@@ -104,8 +104,9 @@ else:
                     st.session_state['hide_safety_message'] = True
                     st.rerun()
         
-        st.subheader("Let's Draw!")
+        st.subheader(f"Let's Draw {st.session_state["username"]}!")
         st.write("Ask me anything about art and drawing! I'm here to help you learn and have fun. 😊")
+
         
         # Initialize session state variables for chat
         if 'messages' not in st.session_state:
@@ -141,7 +142,7 @@ else:
             # Create containers for different parts of the chat interface
             chat_history = st.container()
             input_container = st.container()
-            
+          
             # Display chat history in the first container
             with chat_history:
                 for msg in st.session_state['messages']:
@@ -234,60 +235,71 @@ else:
 
 
                     # Get AI response
-                    thread_config = {"configurable": {"username": st.session_state['username'], "thread_id": "1"}}
+                    thread_config = {"configurable": {"username": st.session_state['username'], 
+                                                      "thread_id": "1", 
+                                                     "consent_settings": st.session_state.consent_settings}}
                     
-                    try:
-                        response = None
-                        if st.session_state['current_image']:
-                            response = stream_messages(
-                                st.session_state['graph'],
-                                text=current_input,
-                                thread=thread_config,
-                                image_path=st.session_state['current_image']
-                            )
-                        else:
-                            response = stream_messages(
-                                st.session_state['graph'],
-                                text=current_input,
-                                thread=thread_config
-                            )
+                    # try:
+                    response = None
+                    
+                    if st.session_state['current_image'] and (
+                        'last_image_used' not in st.session_state or 
+                        st.session_state['last_image_used'] != st.session_state['current_image']
+                    ):
+
+                        response = stream_messages(
+                            st.session_state['graph'],
+                            text=current_input,
+                            thread=thread_config,
+                            image_path=st.session_state['current_image']
+                        )
+                        # Mark this image as used
+                        st.session_state['last_image_used'] = st.session_state['current_image']
+                    
+                    else:
+
+                        response = stream_messages(
+                            st.session_state['graph'],
+                            text=current_input,
+                            thread=thread_config
+                        )
+                    
+                    # Extract the message content
+                    if response:
+                        content = None
+                        if isinstance(response, dict):
+                            # Check for moderator response first
+                            if 'moderator' in response:
+                                content = response['moderator'].get('moderator_response', '')
+                            # Check for messages from different agents
+                            elif 'messages' in response:
+                                messages = response['messages']
+                                if messages and len(messages) > 0:
+                                    content = messages[0].content
+                            # Check for specific agent responses
+                            else:
+                                for node_key in ['visual_artist', 'critic', 'storyteller', 'silly']:
+                                    if node_key in response and 'messages' in response[node_key]:
+                                        messages = response[node_key]['messages']
+                                        if messages and len(messages) > 0:
+                                            content = messages[0].content
+                                            break
                         
-                        # Extract the message content
-                        if response:
-                            content = None
-                            if isinstance(response, dict):
-                                # Check for moderator response first
-                                if 'moderator' in response:
-                                    content = response['moderator'].get('moderator_response', '')
-                                # Check for messages from different agents
-                                elif 'messages' in response:
-                                    messages = response['messages']
-                                    if messages and len(messages) > 0:
-                                        content = messages[0].content
-                                # Check for specific agent responses
-                                else:
-                                    for node_key in ['visual_artist', 'critic', 'storyteller', 'silly']:
-                                        if node_key in response and 'messages' in response[node_key]:
-                                            messages = response[node_key]['messages']
-                                            if messages and len(messages) > 0:
-                                                content = messages[0].content
-                                                break
+                        if content:
+                            st.session_state['messages'].append({
+                                "role": "assistant",
+                                "content": content, 
+                                "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
+                            })
                             
-                            if content:
-                                st.session_state['messages'].append({
-                                    "role": "assistant",
-                                    "content": content, 
-                                    "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
-                                })
-                                
-                        # Initialize next key before rerun
-                        next_key = f"user_input_{st.session_state.input_key}"
-                        if next_key not in st.session_state:
-                            st.session_state[next_key] = ""
-                        st.experimental_rerun()
+                    # Initialize next key before rerun
+                    next_key = f"user_input_{st.session_state.input_key}"
+                    if next_key not in st.session_state:
+                        st.session_state[next_key] = ""
+                    st.experimental_rerun()
                         
-                    except Exception as e:
-                        st.error(f"An error occurred: {str(e)}")
+                    # except Exception as e:
+                    #     st.error(f"An error occurred: {str(e)}")
                 
                 if clear_pressed:
                     st.session_state['messages'] = []
