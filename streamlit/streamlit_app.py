@@ -105,12 +105,21 @@ else:
                     st.rerun()
         
         st.subheader(f"Let's Draw {st.session_state["username"]}!")
-        st.write("Ask me anything about art and drawing! I'm here to help you learn and have fun. 😊")
+        st.write("Let's make something amazing together! I can help you:")
+        st.write("""
+        - 📝 Create fun stories and turn them into art
+        - 🖼️ Give friendly tips about your drawings
+        - 🌈 Learn cool new art techniques
+        - 👩‍🎨 Explore the wonderful world of art
+        
+        Just tell me what sounds fun to you! Remember, every great artist started just like you - with imagination and curiosity! 🌟
+        """)
 
         
         # Initialize session state variables for chat
         if 'messages' not in st.session_state:
             st.session_state['messages'] = []
+        
         if 'current_image' not in st.session_state:
             st.session_state['current_image'] = None
         if 'chat_active' not in st.session_state:

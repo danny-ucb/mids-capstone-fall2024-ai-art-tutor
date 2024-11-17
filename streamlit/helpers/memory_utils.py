@@ -78,107 +78,6 @@ def get_vector_store():
         print(f"Critical error getting vector store: {str(e)}")
         raise
 
-# def get_memory_clusters(memories: List[Dict], similarity_threshold: float = 0.85) -> List[List[Dict]]:
-#     """Group related memories together based on embedding similarity."""
-#     collection = get_vector_store()
-#     clusters = []
-#     used_memories = set()
-
-#     for i, memory in enumerate(memories):
-#         if memory['id'] in used_memories:
-#             continue
-
-#         # Create a cluster starting with this memory
-#         cluster = [memory]
-#         used_memories.add(memory['id'])
-
-#         # Find similar memories using the vector store
-#         similar_results = collection.query(
-#             query_texts=[memory['content']],
-#             n_results=len(memories),  # Get all potential matches
-#             where={"username": memory['metadata']['username']}
-#         )
-
-#         # Add similar memories to cluster
-#         for j, (similar_id, distance) in enumerate(zip(similar_results['ids'][0], similar_results['distances'][0])):
-#             if similar_id not in used_memories and distance <= similarity_threshold:
-#                 similar_memory = next((m for m in memories if m['id'] == similar_id), None)
-#                 if similar_memory:
-#                     cluster.append(similar_memory)
-#                     used_memories.add(similar_id)
-
-#         clusters.append(cluster)
-
-#     return clusters
-
-# def summarize_memory_cluster(cluster: List[Dict]) -> str:
-#     """Summarize a cluster of related memories."""
-#     llm = ChatOpenAI(model="gpt-3.5-turbo")  # Using 3.5 to save tokens
-    
-#     prompt_template = """
-#     Below are several related memories from interactions with a user. 
-#     Please create a concise summary that preserves the key information and patterns while reducing length.
-#     Focus on recurring themes, preferences, and important details.
-
-#     Memories:
-#     {memories}
-
-#     Summary (be concise):
-#     """
-    
-#     prompt = PromptTemplate(
-#         input_variables=["memories"],
-#         template=prompt_template,
-#     )
-    
-#     # Prepare memories text
-#     memories_text = "\n---\n".join([f"Memory {i+1}: {m['content']}" 
-#                                    for i, m in enumerate(cluster)])
-    
-#     # Create and run the chain
-#     chain = LLMChain(llm=llm, prompt=prompt)
-#     summary = chain.run(memories=memories_text)
-    
-#     return summary.strip()
-
-# def consolidate_memories(username: str, max_token_target: int = 6000) -> None:
-#     """Consolidate memories when they exceed token limit."""
-#     collection = get_vector_store()
-    
-#     # Get all memories for user
-#     memories = list_all_memories(username)
-    
-#     # Calculate total tokens
-#     total_tokens = sum(count_tokens(m['content']) for m in memories)
-    
-#     if total_tokens > max_token_target:
-#         # Group related memories
-#         clusters = get_memory_clusters(memories)
-        
-#         # Process each cluster
-#         for cluster in clusters:
-#             if len(cluster) > 1:  # Only summarize clusters with multiple memories
-#                 # Create summary
-#                 summary = summarize_memory_cluster(cluster)
-                
-#                 # Delete old memories
-#                 old_ids = [m['id'] for m in cluster]
-#                 collection.delete(ids=old_ids)
-                
-#                 # Save consolidated memory
-#                 collection.add(
-#                     documents=[summary],
-#                     metadatas=[{
-#                         "username": username,
-#                         "type": "consolidated",
-#                         "original_count": len(cluster),
-#                         "consolidated_date": datetime.now().isoformat(),
-#                         "oldest_memory_date": min(m['metadata'].get('date', datetime.now().isoformat()) 
-#                                                 for m in cluster)
-#                     }],
-#                     ids=[f"{username}_consolidated_{str(uuid.uuid4())}"]
-#                 )
-
 
 def save_session_summary():
     """Save session summary based on consent preferences."""
@@ -251,6 +150,15 @@ def list_all_memories(username: str = None) -> List[Dict]:
         })
     
     return memories
+
+
+
+def should_consolidate_memories(username: str, threshold: int = 15) -> bool:
+    """Check if memory consolidation is needed based on memory count."""
+    memories = list_all_memories(username)
+    non_consolidated_count = sum(1 for m in memories 
+                               if m['metadata'].get('type') != 'consolidated_preference')
+    return non_consolidated_count > threshold
 
 def update_memory(memory_id: str, new_content: str) -> bool:
     """Update the content of a specific memory.
@@ -582,3 +490,103 @@ def send_session_summary_email(sender, recipient, subject, session_details, body
         return None
 
 
+def consolidate_art_memories(username: str, collection) -> None:
+    """Consolidate memories into key artistic preferences and patterns."""
+    
+    # Categories for art-related information
+    art_categories = {
+        "color_preferences": [],
+        "favorite_subjects": [],
+        "art_tools": [],
+        "art_style": [],
+        "skill_level": [],
+        "learning_goals": [],
+        "completed_projects": []
+    }
+    
+    llm = ChatOpenAI(model="gpt-3.5-turbo")
+    
+    # Prompt template for extracting art-related information
+    extract_prompt = PromptTemplate(
+        input_variables=["memory_content"],
+        template="""
+        Extract relevant artistic information from this memory, categorizing into:
+        - Color preferences (favorite colors, color combinations)
+        - Favorite subjects (what they like to draw)
+        - Art tools (physical or digital tools mentioned)
+        - Art style (preferred artistic styles)
+        - Skill level (beginner, intermediate, etc.)
+        - Learning goals (what they want to improve)
+        - Completed projects (finished artworks)
+
+        Memory content:
+        {memory_content}
+
+        Return only the relevant categories in JSON format. If a category has no relevant information, omit it.
+        """
+    )
+    
+    # Create chain for extraction
+    extract_chain = LLMChain(llm=llm, prompt=extract_prompt)
+    
+    # Get all memories for the user
+    memories = list_all_memories(username)
+    
+    # Process each memory
+    for memory in memories:
+        try:
+            # Extract art-related information
+            result = extract_chain.run(memory_content=memory['content'])
+            extracted_info = json.loads(result)
+            
+            # Add to appropriate categories
+            for category, info in extracted_info.items():
+                if info and category in art_categories:
+                    art_categories[category].extend(info if isinstance(info, list) else [info])
+        except Exception as e:
+            print(f"Error processing memory {memory['id']}: {str(e)}")
+            continue
+    
+    # Consolidate and summarize each category
+    summarize_prompt = PromptTemplate(
+        input_variables=["category", "items"],
+        template="""
+        Summarize the following {category} information into a concise, meaningful summary.
+        Remove duplicates and combine related items.
+
+        Items:
+        {items}
+
+        Return a clear, concise summary that captures the key patterns and preferences.
+        """
+    )
+    
+    summarize_chain = LLMChain(llm=llm, prompt=summarize_prompt)
+    
+    # Create consolidated memories
+    for category, items in art_categories.items():
+        if items:
+            try:
+                # Summarize category
+                summary = summarize_chain.run(category=category, items="\n".join(items))
+                
+                # Save consolidated memory
+                collection.add(
+                    documents=[summary],
+                    metadatas=[{
+                        "username": username,
+                        "type": "consolidated_preference",
+                        "category": category,
+                        "consolidated_date": datetime.now().isoformat()
+                    }],
+                    ids=[f"{username}_consolidated_{category}_{str(uuid.uuid4())}"]
+                )
+            except Exception as e:
+                print(f"Error consolidating {category}: {str(e)}")
+                continue
+    
+    # Clean up old memories
+    old_memories = list_all_memories(username)
+    for memory in old_memories:
+        if memory['metadata'].get('type') != 'consolidated_preference':
+            delete_memory(memory['id'])
