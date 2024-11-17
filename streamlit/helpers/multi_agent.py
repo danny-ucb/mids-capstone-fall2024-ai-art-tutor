@@ -11,7 +11,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 import uuid
 import datetime
-
+import json
 #Other Scripts
 from helpers.general_helpers import *
 from helpers.memory_utils import *
@@ -38,7 +38,8 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, get_buffer_string
 from langchain_core.output_parsers.openai_functions import JsonOutputFunctionsParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnableConfig
+# from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import RunnablePassthrough, RunnableSequence, RunnableConfig
 from langchain_core.tools import BaseTool, tool
 from langchain_core.vectorstores import InMemoryVectorStore
 
@@ -51,6 +52,7 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_community.utilities.dalle_image_generator import DallEAPIWrapper
 from langchain_openai import ChatOpenAI
 from langchain_openai.embeddings import OpenAIEmbeddings
+
 
 # Langgraph imports
 from langgraph.checkpoint.memory import MemorySaver
@@ -69,60 +71,67 @@ class AgentState(TypedDict):
     next: str
     is_appropriate: bool
     moderator_response: str
-    window_size: int = 5
+
+
+def create_agent(openai_key: str, 
+                 llm: ChatOpenAI,  
+                 tools: list, 
+                 system_prompt: str):
+    """Create an agent using create_openai_tools_agent that's compatible with LangGraph."""
+    
+    # Create the prompt
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="messages"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ]
+    )
+
+    # Create the agent
+    agent = create_openai_tools_agent(llm, tools, prompt)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True)
+
+    # Create a chain that processes both the messages and recall_memories
+    chain = (
+        RunnablePassthrough.assign(
+            agent_scratchpad=lambda x: []
+        )
+        | agent_executor
+        | (lambda x: {"messages": [AIMessage(content=x["output"])]})
+    )
+
+    return chain
 
 def agent_node(state, agent, name):
+    """Process messages with the agent."""
     # Only use the last 5 messages for each node
-    recent_messages = state["messages"][-5:]
-    
+    recent_messages = state["messages"][-min(5, len(state["messages"])):]
     relevant_memories = state["recall_memories"]
+    
     recall_str = (
         "<recall_memory>\n" + "\n".join(relevant_memories) + "\n</recall_memory>"
     )
 
-    result = agent.invoke({
-        "messages": recent_messages,
-        "recall_memories": recall_str,
-    })
+    # Add recall memories to the last message if it's from the user
+    if recent_messages and isinstance(recent_messages[-1], HumanMessage):
+        last_msg_content = recent_messages[-1].content
+        if isinstance(last_msg_content, str):
+            recent_messages[-1] = HumanMessage(content=f"{last_msg_content}\n\n{recall_str}")
+        elif isinstance(last_msg_content, list):
+            # Handle multi-modal content
+            text_content = next((item["text"] for item in last_msg_content if item.get("type") == "text"), "")
+            updated_content = [
+                *last_msg_content,
+                {"type": "text", "text": f"\n\n{recall_str}"}
+            ]
+            recent_messages[-1] = HumanMessage(content=updated_content)
 
-    # Handle image removal from the last message
-    # last_msg = recent_messages[-1]
-    # if hasattr(last_msg, 'content'):
-    #     if isinstance(last_msg.content, list):
-    #         text_content = ""
-    #         for content_item in last_msg.content:
-    #             if isinstance(content_item, dict) and content_item.get("type") == "text":
-    #                 text_content = content_item.get("text", "")
-    #                 break
-    #         state["messages"][-1] = HumanMessage(content=text_content)
-    #         print("Image removed after usage")
-
-    return {"messages": [result]}
-
-
-
-def create_agent(openai_key:str, 
-                 llm: ChatOpenAI,  
-                 tools: list, 
-                 system_prompt: str):
-    # Each worker node will be given a name and some tools.
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                system_prompt,
-            ),
-            MessagesPlaceholder(variable_name="messages"),
-            # MessagesPlaceholder(variable_name="agent_scratchpad")
-        ]
-    )
-
-    llm_with_tools = llm.bind_tools(tools)
-    agent_chain = (
-        prompt |
-        llm_with_tools
-    )
-    return agent_chain
+    try:
+        result = agent.invoke({"messages": recent_messages})
+        return result
+    except Exception as e:
+        return {"messages": [AIMessage(content=f"An error occurred: {str(e)}")]}
     
 def get_username(config: RunnableConfig) -> str:
     """Get username from the config."""
@@ -242,9 +251,6 @@ def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
     username = get_username(config)
     consent_settings = config["configurable"].get("consent_settings", {})
     
-    # # Check if memory collection is allowed
-    # if not consent_settings.get("memory_collection", False):
-    #     return []
     collection = get_vector_store()
     
     query_results = collection.query(
@@ -256,42 +262,28 @@ def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
         return []
     return [doc[0] for doc in query_results["documents"]]
 
-# @tool
-# def search_recall_memories(query: str, config: RunnableConfig, max_tokens: int = 4000) -> List[str]:
-#     """Search for relevant memories, with token management."""
-#     username = get_username(config)
-    
-#     # Check if consolidation is needed
-#     total_memories = list_all_memories(username)
-#     total_tokens = sum(count_tokens(m['content']) for m in total_memories)
-    
-#     if total_tokens > max_tokens * 2:  # Add some buffer
-#         consolidate_memories(username, max_tokens)
-    
-#     collection = get_vector_store()
-    
-#     # Get initial results
-#     results = collection.query(
-#         query_texts=[query],
-#         n_results=5,  # Start with a reasonable number
-#         where={"username": username}
-#     )
-    
-#     if not results['documents'][0]:
-#         return []
-    
-#     # Process results while respecting token limit
-#     memories = []
-#     current_tokens = 0
-    
-#     for doc in results['documents'][0]:
-#         doc_tokens = count_tokens(doc)
-#         if current_tokens + doc_tokens > max_tokens:
-#             break
-#         memories.append(doc)
-#         current_tokens += doc_tokens
-    
-#     return memories
+def format_to_openai_tool_messages(intermediate_steps):
+    """Format intermediate steps into OpenAI tool messages."""
+    messages = []
+    for action, observation in intermediate_steps:
+        messages.append({
+            "tool_calls": [{
+                "id": str(uuid.uuid4()),
+                "type": "function",
+                "function": {
+                    "name": action.tool,
+                    "arguments": json.dumps(action.tool_input)
+                }
+            }],
+            "role": "assistant"
+        })
+        messages.append({
+            "tool_call_id": messages[-1]["tool_calls"][0]["id"],
+            "role": "tool",
+            "name": action.tool,
+            "content": str(observation)
+        })
+    return messages
 
 
 def create_nodes(openai_key):
@@ -352,22 +344,20 @@ def create_nodes(openai_key):
             "next": result
         }
     
-    
+
     memory_usage_prompt = ( "Memory Usage Guidelines:\n"
-                "1. Actively use memory tools (save_recall_memory)"
-                " to build a comprehensive understanding of the user.\n"
-                "2. Never explicitly mention your memory capabilities."
-                " Instead, seamlessly incorporate your understanding of the user"
-                " into your responses.\n"
-                "3. Regularly reflect on past interactions to identify patterns and"
-                " preferences.\n"
-                "4. Cross-reference new information with existing memories for"
-                " consistency.\n"     
-                "5. Recognize and acknowledge changes in the user's situation or"
-                " perspectives over time.\n"
-                "## Recall Memories\n"
-                "Recall memories are contextually retrieved based on the current"
-                " conversation:\n\n")
+            "1. Actively use (search_recall_memories)"
+            " to give personalized recommendation based past stated user preferences\n"
+            "2. Never explicitly mention your memory capabilities."
+            " Instead, seamlessly incorporate your understanding of the user"
+            " into your responses.\n"
+            "3. Cross-reference new information with existing memories for"
+            " consistency.\n"     
+            "4. Recognize and acknowledge changes in the user's situation or"
+            " perspectives over time.\n"
+            "## Recall Memories\n"
+            "Recall memories are contextually retrieved based on the current"
+            " conversation:\n\n")
     
     storyteller_prompt = ("Talk in a teacher's encouraging and engaging tone to 8-10 years old. \
         Use languages that are easy to understand for the age group.\
@@ -375,12 +365,23 @@ def create_nodes(openai_key):
             Actively use wikipedia_tool to show relevant art history or theory related to user queries)\
                 Actively use memory tool (save_recall_memory)\
                 to build a comprehensive understanding of the user")
-    
-    visual_artist_prompt = ("You're a visual artist. \
-        Always use (generate_image) tool to visualize ideas in children's illustration style most relatable to 8-10 years old, but invoke (generate_image) only once\
-            After calling the tool, briefly explain the generated image to user \
-                Actively use memory tools (save_recall_memory)\
-                to build a comprehensive understanding of the user.")
+
+    visual_artist_prompt = """You're a visual artist helping 8-10 year old children. 
+            When asked to create or draw something, always use the generate_image tool with specific, child-friendly prompts.
+            Keep your language simple and engaging.
+            After generating an image, briefly explain what you created.
+            Use memory tools to understand user preferences.
+            
+            Follow these steps when generating images:
+            1. Add "in a children's illustration style" to your prompts
+            2. Keep prompts age-appropriate and positive
+            3. Use clear, descriptive language
+            4. Avoid any scary or inappropriate content
+            
+            Remember to:
+            - Only generate one image per request
+            - Explain the image after it's created
+            - Be encouraging and supportive"""
     
     critic_prompt = ("You give feedback on user's artwork and how to improve.\
         Talk in simple and engaging style to 8-10 years old, use languages that are easy to understand for the age group\
@@ -533,20 +534,6 @@ def download_image_requests(url, file_name):
             file.write(response.content)
     else:
         pass
-
-def get_relevant_history(messages: List[Dict], window_size: int = 5) -> List[Dict]:
-    """Get most relevant conversation history, keeping the first message for context
-    and the last few messages for recent context."""
-    if len(messages) <= window_size:
-        return messages
-        
-    # Always keep the first message for context
-    first_message = messages[0]
-    # Get the last n-1 messages (since we're keeping the first one)
-    recent_messages = messages[-window_size+1:]
-    
-    return [first_message] + recent_messages
-
 def convert_to_langchain_messages(messages: List[Dict]) -> List[BaseMessage]:
     """Convert dictionary messages to LangChain BaseMessage objects."""
     converted_messages = []
@@ -558,60 +545,7 @@ def convert_to_langchain_messages(messages: List[Dict]) -> List[BaseMessage]:
     return converted_messages
 
 
-def truncate_messages(messages: List[Dict], max_length: int = 2000) -> List[Dict]:
-    """Truncate messages to stay within OpenAI's limits while preserving context."""
-    if not messages:
-        return []
-        
-    # Always keep the first message for context
-    initial_message = messages[0]
-    current_length = len(str(initial_message))
-    
-    # Start from the most recent messages and work backwards
-    recent_messages = []
-    for msg in reversed(messages[1:]):  # Skip the first message
-        msg_length = len(str(msg))
-        if current_length + msg_length < max_length:
-            recent_messages.insert(0, msg)  # Insert at beginning to maintain order
-            current_length += msg_length
-        else:
-            break
-    
-    return [initial_message] + recent_messages
 
-## Original & Working
-# def stream_messages(graph, text: str, thread: dict, image_path: str= None):
-
-#     # Initialize the content with the text message
-#     content = [{"type": "text", "text": text}]
-
-#     # If image_url is provided, append the image content
-#     if image_path:
-#         base64_image = encode_image(image_path)
-#         content.append({
-#             "type": "image_url",
-#             "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-#         })
-
-#     # Define the input for the graph stream
-#     input_data = {
-#         "messages": [
-#             HumanMessage(content=content)
-#         ]
-#     }
-
-#         # Initialize a variable to store the final output message
-#     final_message = ""
-
-#     # Stream the graph and capture only the final message output
-#     for s in graph.stream(input_data, config=thread):
-#         if "__end__" not in s:
-#             # Capture the most recent message (final one)
-#             final_message = s
-    
-#     return(final_message)
-
-# Version 1
 def stream_messages(graph, text: str, thread: dict, image_path: str = None):
     # Initialize the content with the text message
     content = [{"type": "text", "text": text}]
@@ -626,8 +560,7 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
 
     # Get the windowed message history and convert to LangChain format
     if 'messages' in st.session_state:
-        history_messages = get_relevant_history(st.session_state['messages'])
-        current_messages = convert_to_langchain_messages(history_messages)
+        current_messages = convert_to_langchain_messages(st.session_state['messages'])
     else:
         current_messages = []
 
@@ -639,6 +572,9 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
         "messages": input_messages
     }
 
+    total_tokens = calculate_messages_tokens(input_data)
+    st.write(f"total tokens: {total_tokens}")
+
     # Initialize a variable to store the final output message
     final_message = ""
 
@@ -648,3 +584,67 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
             final_message = s
     
     return final_message
+
+## previously working
+def convert_to_langchain_messages(messages):
+    """Convert dictionary messages to LangChain BaseMessage objects with enhanced content handling."""
+    converted_messages = []
+    for msg in messages:
+        content = msg['content']
+        
+        # Handle different content types
+        if isinstance(content, str):
+            # If content is a URL, treat it as an image
+            if content.startswith('http'):
+                content = [{"type": "text", "text": f"Generated image: {content}"}]
+            else:
+                content = [{"type": "text", "text": content}]
+        elif isinstance(content, list):
+            # Content is already in the correct format
+            pass
+        else:
+            # Convert other types to text
+            content = [{"type": "text", "text": str(content)}]
+            
+        if msg['role'] == 'user':
+            converted_messages.append(HumanMessage(content=content))
+        elif msg['role'] == 'assistant':
+            converted_messages.append(AIMessage(content=content))
+            
+    return converted_messages
+
+
+def calculate_message_tokens(message):
+    """
+    Calculate tokens for a single message. Handles both LangChain message objects and raw strings.
+    """
+    if isinstance(message, (HumanMessage, AIMessage)):
+        # LangChain messages have a `content` attribute
+        role = getattr(message, 'role', '')  # HumanMessage or AIMessage may have this attribute
+        content = message.content
+        return len(tokenizer.encode(role)) + len(tokenizer.encode(str(content)))
+    elif isinstance(message, str):
+        # Handle raw strings (fallback)
+        return len(tokenizer.encode(message))
+    else:
+        raise TypeError(f"Unexpected message type: {type(message)}")
+
+def calculate_messages_tokens(messages):
+    """
+    Calculate the total tokens for a list of messages.
+    """
+    return sum(calculate_message_tokens(msg) for msg in messages)
+
+def trim_messages_to_fit(messages, max_tokens):
+    """
+    Trim a list of LangChain message objects to fit within a maximum token limit.
+    """
+    # Trim messages by removing the oldest (first) until under the token limit
+    trimmed_messages = messages[:]
+    
+    # Trim messages until the token count is within the limit
+    while calculate_messages_tokens(trimmed_messages) > max_tokens:
+        trimmed_messages.pop(0)  # Remove the oldest message
+    
+    return trimmed_messages
+    
