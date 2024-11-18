@@ -48,7 +48,7 @@ def check_consent(username: str, consent_type: str) -> bool:
     Returns:
         bool: True if consent is given, False otherwise
     """
-
+    consent_file = f'user_consents/{username}_consent.json'
     try:
         if os.path.exists(consent_file):
             with open(consent_file, 'r') as f:
