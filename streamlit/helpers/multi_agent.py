@@ -557,7 +557,16 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
         })
+    # if image_path:
+    #     img_hosted_path = upload_image_and_get_url(image_path, st.session_state["username"])
+    #     st.write(img_hosted_path)
+    #     # base64_image = encode_image(image_path)
+    #     content.append({
+    #         "type": "image_url",
+    #         "image_url": {"url": img_hosted_path}
+    #     })
 
+    
     # Get the windowed message history and convert to LangChain format
     if 'messages' in st.session_state:
         current_messages = convert_to_langchain_messages(st.session_state['messages'])
@@ -573,7 +582,6 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
     }
 
     total_tokens = calculate_messages_tokens(input_data)
-    st.write(f"total tokens: {total_tokens}")
 
     # Initialize a variable to store the final output message
     final_message = ""

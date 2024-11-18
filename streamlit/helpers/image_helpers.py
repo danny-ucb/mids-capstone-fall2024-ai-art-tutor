@@ -196,3 +196,75 @@ def cleanup_temp_files():
                         print(f"Error removing temp file {filename}: {str(e)}")
     except Exception as e:
         print(f"Error during cleanup: {str(e)}")
+
+# Initialize a session using your credentials
+session = boto3.Session(
+    aws_access_key_id='AKIA6IY35YCLBJCCEZX6',
+    aws_secret_access_key='nNxRSmCPsUHjBF5Te9oPXOX7G2dNFQ7UuIGSvU4y',
+)
+
+# Initialize S3 resource
+s3 = session.resource('s3')
+
+# Specify the bucket name
+bucket_name = 'artbuddy-image-bucket'
+
+def upload_image_and_get_url(image_path, username):
+    """
+    Upload an image to S3 with a filename containing username and timestamp.
+    
+    :param image_path: Path to the local image file.
+    :param username: Username of the person uploading the image.
+    :return: The public URL of the uploaded image if successful, None otherwise.
+    """
+    try:
+        # Ensure the image file exists
+        if not os.path.isfile(image_path):
+            print(f'Image {image_path} does not exist.')
+            return None
+        
+        # Get file extension from original file
+        file_extension = os.path.splitext(image_path)[1].lower()
+        
+        # Create timestamp in format: YYYYMMDD_HHMMSS
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Create sanitized filename: username_timestamp.extension
+        sanitized_username = ''.join(c for c in username if c.isalnum() or c in '-_')
+        file_name = f"user_uploads/{sanitized_username}/{timestamp}{file_extension}"
+        
+        # Upload the image
+        s3.Bucket(bucket_name).upload_file(
+            image_path, 
+            file_name,
+            ExtraArgs={'ContentType': f'image/{file_extension[1:]}'}  # Set proper content type
+        )
+        print(f'Successfully uploaded {image_path} as {file_name}')
+        
+        # Construct the URL
+        bucket_location = s3.meta.client.get_bucket_location(Bucket=bucket_name)
+        region = bucket_location['LocationConstraint'] or 'us-east-1'
+        if region == 'us-east-1':
+            url = f"https://{bucket_name}.s3.amazonaws.com/{file_name}"
+        else:
+            url = f"https://{bucket_name}.s3-{region}.amazonaws.com/{file_name}"
+        
+        return url
+    except NoCredentialsError:
+        print('Credentials not available')
+        return None
+    except PartialCredentialsError:
+        print('Incomplete credentials provided')
+        return None
+    except Exception as e:
+        print(f'Error: {e}')
+        return None
+
+
+# def download_image_requests(url, file_name):
+#     response = requests.get(url)
+#     if response.status_code == 200:
+#         with open(file_name, 'wb') as file:
+#             file.write(response.content)
+#     else:
+#         pass
