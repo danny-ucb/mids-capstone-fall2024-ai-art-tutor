@@ -51,7 +51,7 @@ def registration_page():
         st.session_state.registration_step = 'initial'
 
     # Form inputs
-    username = st.text_input("Enter a Username")
+    username = st.text_input("Enter a Username").lower()
     email = st.text_input("Enter a Parent's Email")
     password = st.text_input("Enter a Password", type="password")
     confirm_password = st.text_input("Confirm Password", type="password")
@@ -129,7 +129,7 @@ def login_page():
     if 'login_attempt' not in st.session_state:
         st.session_state.login_attempt = False
         
-    username = st.text_input("Username")
+    username = st.text_input("Username").lower()
     password = st.text_input("Password", type="password")
 
     if st.button("Login") or st.session_state.login_attempt:

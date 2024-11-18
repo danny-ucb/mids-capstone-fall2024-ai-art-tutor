@@ -23,6 +23,7 @@ from helpers.image_helpers import *
 from helpers.memory_utils import * 
 from app_pages.parental_controls import *
 from app_pages.login_registration_page import *
+from app_pages.beta_feedback import * 
 
 timezone = pytz.timezone("America/New_York")
 
@@ -51,12 +52,13 @@ else:
     # Main application for logged-in users
     openai_key = get_keys()
     inject_custom_css()
+
     # Initialize hide_safety_message in session state if it doesn't exist
     if 'hide_safety_message' not in st.session_state:
         st.session_state['hide_safety_message'] = False
     
     # page = st.sidebar.selectbox("Select a page", ["Home", "Parental Controls"])
-    main_page, parental_controls = st.tabs(["Home", "Parental Controls"])
+    main_page, parental_controls, beta_feedback = st.tabs(["Home", "Parental Controls", "Beta Testing Feedback"])
     
     if 'graph' not in st.session_state:
         st.session_state['graph'] = create_nodes(openai_key)
@@ -143,9 +145,12 @@ else:
         # Start Chat button
         if not st.session_state['chat_active']:
             if st.button("💬 Start Chat!"):
+                current_username = st.session_state.get("username", None)
                 st.session_state['chat_active'] = True
-                st.experimental_rerun()
-        
+                if current_username:
+                    st.session_state["username"] = current_username
+                st.experimental_rerun()    
+                
         # Chat interface
         if st.session_state['chat_active']:
             # Create containers for different parts of the chat interface
@@ -189,11 +194,18 @@ else:
                 current_key = f"user_input_{st.session_state.input_key}"
                 if current_key not in st.session_state:
                     st.session_state[current_key] = ""
-            
+
                 def handle_submit():
-                    if st.session_state[current_key]:  # Now we can safely check this
+                    if st.session_state[current_key]:
+                        # Store username before submission
+                        current_username = st.session_state.get("username")
+                        
                         st.session_state.submit_pressed = True
                         st.session_state.temp_input = st.session_state[current_key]
+                        
+                        # Restore username
+                        if current_username:
+                            st.session_state["username"] = current_username
                         
                 user_input = st.text_input(
                     "Type your message here:",
@@ -325,3 +337,6 @@ else:
         
         # Call the function to display the parental controls page
         parental_controls_page()
+
+    with beta_feedback:
+        beta_feedback_page()
