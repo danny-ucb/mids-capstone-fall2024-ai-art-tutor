@@ -118,8 +118,15 @@ else:
         - 🖼️ Give friendly tips about your drawings
         - 🌈 Learn cool new art techniques
         - 👩‍🎨 Explore the wonderful world of art
+        - 🎨 Generate example images to inspire your creativity
+        - ✏️ Practice drawing alongside AI-generated examples
         
-        Just tell me what sounds fun to you! Remember, every great artist started just like you - with imagination and curiosity! 🌟
+        Just tell me what sounds fun to you! You can ask me to generate example images to help you practice, or show me your own drawings for friendly feedback. Remember, every great artist started just like you - with imagination and curiosity! 🌟
+        
+        Try saying things like:
+        - "Can you show me how to draw a friendly dragon?"
+        - "Generate an example of a magical forest I can practice drawing"
+        - "Help me learn to draw cartoon animals"
         """)
         
         # Initialize session state variables for chat
@@ -259,7 +266,6 @@ else:
                             "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
                         })
     
-    
                         # Get AI response
                         thread_config = {"configurable": {"username": st.session_state['username'], 
                                                           "thread_id": "1", 
@@ -325,6 +331,7 @@ else:
                                 for msg in st.session_state['messages'][-3:]
                             
                             )
+                            
                             if not is_duplicate_response:
                                 st.session_state['messages'].append({
                                     "role": "assistant",

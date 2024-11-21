@@ -73,6 +73,49 @@ class AgentState(TypedDict):
     is_appropriate: bool
     moderator_response: str
 
+# class AgentState(TypedDict):
+#     messages: Annotated[Sequence[BaseMessage], operator.add]
+#     recall_memories: Annotated[Sequence[str], operator.add]
+#     next: str
+#     is_appropriate: bool
+#     moderator_response: str
+    
+#     def __init__(self, messages=None, recall_memories=None, next="", is_appropriate=True, moderator_response=""):
+#         super().__init__()
+#         self._full_messages = messages or []
+#         self['messages'] = messages or []
+#         self['recall_memories'] = recall_memories or []
+#         self['next'] = next
+#         self['is_appropriate'] = is_appropriate
+#         self['moderator_response'] = moderator_response
+
+#     @property
+#     def messages(self) -> List[BaseMessage]:
+#         """Get the last 5 messages for processing."""
+#         return self['messages'][-5:] if self['messages'] else []
+
+#     @messages.setter
+#     def messages(self, new_messages: List[BaseMessage]):
+#         """Append new messages while maintaining the full history."""
+#         if not isinstance(self['messages'], list):
+#             self['messages'] = []
+#         self['messages'].extend(new_messages)
+
+#     @property
+#     def full_messages(self) -> List[BaseMessage]:
+#         """Get all messages (full conversation)."""
+#         return self['messages']
+
+#     def to_dict(self) -> dict:
+#         """Convert to dictionary representation."""
+#         return {
+#             'messages': self['messages'],
+#             'recall_memories': self['recall_memories'],
+#             'next': self['next'],
+#             'is_appropriate': self['is_appropriate'],
+#             'moderator_response': self['moderator_response']
+#         }
+
 
 def create_agent(openai_key: str, 
                  llm: ChatOpenAI,  
@@ -107,10 +150,8 @@ def create_agent(openai_key: str,
 
 def agent_node(state, agent, name):
     """Process messages with the agent."""
-    # Keep only the last 4 messages
 
-    recent_messages = state["messages"][-6:] if len(state["messages"]) > 6 else state["messages"]
-    # recent_messages = state["messages"]
+    recent_messages = state["messages"]
     relevant_memories = state["recall_memories"]
     
     recall_str = (
@@ -451,6 +492,7 @@ def create_nodes(openai_key):
     tools = [generate_image, wikipedia_tool, save_recall_memory, search_recall_memories]
 
     multiagent = StateGraph(AgentState)
+    
     multiagent.add_node("load_memories", load_memories)
     multiagent.add_node("semantic_router", semantic_router)
     multiagent.add_node("visual_artist", visual_artist_node)
@@ -513,16 +555,6 @@ def download_image_requests(url, file_name):
             file.write(response.content)
     else:
         pass
-# def convert_to_langchain_messages(messages: List[Dict]) -> List[BaseMessage]:
-#     """Convert dictionary messages to LangChain BaseMessage objects."""
-#     converted_messages = []
-#     for msg in messages:
-#         if msg['role'] == 'user':
-#             converted_messages.append(HumanMessage(content=msg['content']))
-#         elif msg['role'] == 'assistant':
-#             converted_messages.append(AIMessage(content=msg['content']))
-#     return converted_messages
-
 
 
 def stream_messages(graph, text: str, thread: dict, image_path: str = None):
@@ -554,6 +586,7 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
         ],
     }
 
+
     # Initialize a variable to store the final output message
     final_message = ""
 
@@ -563,101 +596,6 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
             final_message = s
     
     return final_message
-
-## previously working
-def convert_to_langchain_messages(messages):
-    """Convert dictionary messages to LangChain BaseMessage objects with enhanced content handling."""
-    converted_messages = []
-    for msg in messages:
-        content = msg['content']
-        
-        # Handle different content types
-        if isinstance(content, str):
-            # If content is a URL, treat it as an image
-            if content.startswith('http'):
-                content = [{"type": "text", "text": f"Generated image: {content}"}]
-            else:
-                content = [{"type": "text", "text": content}]
-        elif isinstance(content, list):
-            # Content is already in the correct format
-            pass
-        else:
-            # Convert other types to text
-            content = [{"type": "text", "text": str(content)}]
-            
-        if msg['role'] == 'user':
-            converted_messages.append(HumanMessage(content=content))
-        elif msg['role'] == 'assistant':
-            converted_messages.append(AIMessage(content=content))
-            
-    return converted_messages
-
-
-def handle_messages(current_input, state, thread_config):
-    """
-    Centralized message handling with deduplication
-    """
-    # 1. Add message to history with a unique identifier
-    message_id = str(uuid.uuid4())
-    new_message = {
-        "id": message_id,
-        "role": "user",
-        "content": current_input,
-        "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
-    }
-    
-    # 2. Deduplicate messages before adding
-    existing_messages = state['messages']
-    is_duplicate = any(
-        msg.get('content') == current_input and 
-        msg.get('role') == 'user'
-        for msg in existing_messages[-3:] # Check last 3 messages
-    )
-    
-    if not is_duplicate:
-        state['messages'].append(new_message)
-        
-        # 3. Get AI response
-        response = None
-        if state['current_image'] and (
-            'last_image_used' not in state or 
-            state['last_image_used'] != state['current_image']
-        ):
-            response = stream_messages(
-                state['graph'],
-                text=current_input,
-                thread=thread_config,
-                image_path=state['current_image']
-            )
-            state['last_image_used'] = state['current_image']
-        else:
-            response = stream_messages(
-                state['graph'],
-                text=current_input,
-                thread=thread_config
-            )
-            
-        # 4. Process and deduplicate response
-        if response:
-            content = extract_response_content(response)
-            if content:
-                # Check for duplicate responses
-                is_duplicate_response = any(
-                    msg.get('content') == content and 
-                    msg.get('role') == 'assistant'
-                    for msg in existing_messages[-3:]
-                )
-                
-                if not is_duplicate_response:
-                    state['messages'].append({
-                        "id": str(uuid.uuid4()),
-                        "role": "assistant",
-                        "content": content,
-                        "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
-                    })
-        
-        return True
-    return False
 
 def extract_response_content(response):
     """Extract content from the response object"""
@@ -690,4 +628,3 @@ def cleanup_duplicate_messages(messages):
             seen.add(msg_key)
             cleaned.append(msg)
     return cleaned
-
