@@ -38,6 +38,7 @@ from helpers.consent_utils import *
 # Compression
 import zipfile
 
+
 # Function to inject custom CSS
 def inject_custom_css():
     st.markdown(

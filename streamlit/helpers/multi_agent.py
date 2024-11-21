@@ -6,12 +6,13 @@ import operator
 import os
 import random
 import string
-from typing import Annotated, List, Sequence, TypedDict
+from typing import Annotated, List, Sequence, TypedDict, Any, Dict
 import chromadb
 from chromadb.utils import embedding_functions
 import uuid
 import datetime
 import json
+
 #Other Scripts
 from helpers.general_helpers import *
 from helpers.memory_utils import *
@@ -58,7 +59,7 @@ from langchain_openai.embeddings import OpenAIEmbeddings
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
-
+timezone = pytz.timezone("America/New_York")
 
 
 # The agent state is the input to each node in the graph
@@ -103,16 +104,19 @@ def create_agent(openai_key: str,
 
     return chain
 
+
 def agent_node(state, agent, name):
     """Process messages with the agent."""
-    # Only use the last 5 messages for each node
-    recent_messages = state["messages"][-min(5, len(state["messages"])):]
+    # Keep only the last 4 messages
+
+    recent_messages = state["messages"][-6:] if len(state["messages"]) > 6 else state["messages"]
+    # recent_messages = state["messages"]
     relevant_memories = state["recall_memories"]
     
     recall_str = (
         "<recall_memory>\n" + "\n".join(relevant_memories) + "\n</recall_memory>"
     )
-
+    
     # Add recall memories to the last message if it's from the user
     if recent_messages and isinstance(recent_messages[-1], HumanMessage):
         last_msg_content = recent_messages[-1].content
@@ -126,19 +130,12 @@ def agent_node(state, agent, name):
                 {"type": "text", "text": f"\n\n{recall_str}"}
             ]
             recent_messages[-1] = HumanMessage(content=updated_content)
-
-    try:
-        result = agent.invoke({"messages": recent_messages})
-        return result
-    except Exception as e:
-        return {"messages": [AIMessage(content=f"An error occurred: {str(e)}")]}
     
-def get_username(config: RunnableConfig) -> str:
-    """Get username from the config."""
-    username = config["configurable"].get("username")
-    if username is None:
-        raise ValueError("Username needs to be provided to save a memory.")
-    return username
+    # try:
+    result = agent.invoke({"messages": recent_messages})
+    return result
+
+
 
 # function for load_memories
 tokenizer = tiktoken.encoding_for_model("gpt-4o-mini")
@@ -228,7 +225,8 @@ def generate_image(query: str):
 @tool
 def save_recall_memory(memory: str, config: RunnableConfig) -> str:
     """Save memory to vectorstore for later semantic retrieval."""
-    username = get_username(config)
+    # username = get_username(config)
+    username = st.session_state["username"]
     consent_settings = config["configurable"].get("consent_settings", {})
     
     # Check if memory collection is allowed
@@ -248,7 +246,8 @@ def save_recall_memory(memory: str, config: RunnableConfig) -> str:
 @tool
 def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
     """Search for relevant memories."""
-    username = get_username(config)
+    # username = get_username(config)
+    username = st.session_state["username"]
     consent_settings = config["configurable"].get("consent_settings", {})
     
     collection = get_vector_store()
@@ -261,30 +260,6 @@ def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
     if len(query_results["documents"][0]) == 0:
         return []
     return [doc[0] for doc in query_results["documents"]]
-
-def format_to_openai_tool_messages(intermediate_steps):
-    """Format intermediate steps into OpenAI tool messages."""
-    messages = []
-    for action, observation in intermediate_steps:
-        messages.append({
-            "tool_calls": [{
-                "id": str(uuid.uuid4()),
-                "type": "function",
-                "function": {
-                    "name": action.tool,
-                    "arguments": json.dumps(action.tool_input)
-                }
-            }],
-            "role": "assistant"
-        })
-        messages.append({
-            "tool_call_id": messages[-1]["tool_calls"][0]["id"],
-            "role": "tool",
-            "name": action.tool,
-            "content": str(observation)
-        })
-    return messages
-
 
 def create_nodes(openai_key):
 
@@ -358,13 +333,15 @@ def create_nodes(openai_key):
             "## Recall Memories\n"
             "Recall memories are contextually retrieved based on the current"
             " conversation:\n\n")
-    
-    storyteller_prompt = ("Talk in a teacher's encouraging and engaging tone to 8-10 years old. \
-        Use languages that are easy to understand for the age group.\
-        You help users build a richer storyline and give them inspirations. \
-            Actively use wikipedia_tool to show relevant art history or theory related to user queries)\
-                Actively use memory tool (save_recall_memory)\
-                to build a comprehensive understanding of the user")
+
+
+    storyteller_prompt = """
+        Talk in a teacher's encouraging and engaging tone to 8-10 years old.
+        Use language that's easy to understand for the age group.
+        You help users build a richer storyline and give them inspirations.
+        Actively use memory tool (save_recall_memory)
+        Keep responses engaging and no longer than 2-3 sentences.
+        """
 
     visual_artist_prompt = """You're a visual artist helping 8-10 year old children. 
             When asked to create or draw something, always use the generate_image tool with specific, child-friendly prompts.
@@ -382,12 +359,14 @@ def create_nodes(openai_key):
             - Only generate one image per request
             - Explain the image after it's created
             - Be encouraging and supportive"""
-    
-    critic_prompt = ("You give feedback on user's artwork and how to improve.\
-        Talk in simple and engaging style to 8-10 years old, use languages that are easy to understand for the age group\
-        Actively use wikipedia_tool to show relevant art history or theory related to user query\
-                    Actively use memory tools (save_recall_memory)\
-                to build a comprehensive understanding of the user.")
+
+
+    critic_prompt = """
+        You give feedback on user's artwork and how to improve.
+        Talk in simple and engaging style to 8-10 years old.
+        Actively use memory tools (save_recall_memory).
+        Keep critiques brief and encouraging, using age-appropriate language.
+        """
 
 
     llm = ChatOpenAI(model="gpt-4o-mini")
@@ -397,10 +376,9 @@ def create_nodes(openai_key):
     semantic_router = functools.partial(router_node, name="semantic_router", route_layer=rl)
     
 
-    # storyteller
     storyteller = create_agent(openai_key,
                                llm,
-                               [wikipedia_tool,save_recall_memory,search_recall_memories],
+                               [save_recall_memory,search_recall_memories],
                                storyteller_prompt+"\n"+memory_usage_prompt)
     
     storyteller_node = functools.partial(agent_node, agent=storyteller, name="storyteller")
@@ -410,7 +388,8 @@ def create_nodes(openai_key):
     visual_artist_node = functools.partial(agent_node, agent=visual_artist, name="visual_artist")
     
     # critic
-    critic = create_agent(openai_key, llm,[wikipedia_tool,save_recall_memory,search_recall_memories],critic_prompt+"\n"+memory_usage_prompt)
+
+    critic = create_agent(openai_key, llm,[save_recall_memory,search_recall_memories],critic_prompt+"\n"+memory_usage_prompt)
     critic_node = functools.partial(agent_node, agent=critic, name="critic")
     
     # silly agent
@@ -454,7 +433,7 @@ def create_nodes(openai_key):
     "Next, check the conversation: you are moderating and adjusting AI-generated content to ensure it is suitable for children. "
     "If the AI response is not suitable for children, rephrase it; otherwise, keep it the same. The response should avoid complex language "
     "and sensitive topics (e.g., violence, inappropriate language) and be presented in a friendly, encouraging tone. If the content is inappropriate "
-    "or too complex, adjust it to be simpler and suitable for children, maintaining the original idea and length. "
+    "or too complex, adjust it to be simpler and suitable for children, maintaining the original idea and length. Keep all output to 1-3 sentences maximum"
     "Only invoke once per AI response."
     )
 
@@ -534,15 +513,15 @@ def download_image_requests(url, file_name):
             file.write(response.content)
     else:
         pass
-def convert_to_langchain_messages(messages: List[Dict]) -> List[BaseMessage]:
-    """Convert dictionary messages to LangChain BaseMessage objects."""
-    converted_messages = []
-    for msg in messages:
-        if msg['role'] == 'user':
-            converted_messages.append(HumanMessage(content=msg['content']))
-        elif msg['role'] == 'assistant':
-            converted_messages.append(AIMessage(content=msg['content']))
-    return converted_messages
+# def convert_to_langchain_messages(messages: List[Dict]) -> List[BaseMessage]:
+#     """Convert dictionary messages to LangChain BaseMessage objects."""
+#     converted_messages = []
+#     for msg in messages:
+#         if msg['role'] == 'user':
+#             converted_messages.append(HumanMessage(content=msg['content']))
+#         elif msg['role'] == 'assistant':
+#             converted_messages.append(AIMessage(content=msg['content']))
+#     return converted_messages
 
 
 
@@ -567,21 +546,13 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
     #     })
 
     
-    # Get the windowed message history and convert to LangChain format
-    if 'messages' in st.session_state:
-        current_messages = convert_to_langchain_messages(st.session_state['messages'])
-    else:
-        current_messages = []
-
-    # Add the new message
-    input_messages = current_messages + [HumanMessage(content=content)]
 
     # Define the input for the graph stream
     input_data = {
-        "messages": input_messages
+        "messages": [
+            HumanMessage(content=content)
+        ],
     }
-
-    total_tokens = calculate_messages_tokens(input_data)
 
     # Initialize a variable to store the final output message
     final_message = ""
@@ -622,37 +593,101 @@ def convert_to_langchain_messages(messages):
     return converted_messages
 
 
-def calculate_message_tokens(message):
+def handle_messages(current_input, state, thread_config):
     """
-    Calculate tokens for a single message. Handles both LangChain message objects and raw strings.
+    Centralized message handling with deduplication
     """
-    if isinstance(message, (HumanMessage, AIMessage)):
-        # LangChain messages have a `content` attribute
-        role = getattr(message, 'role', '')  # HumanMessage or AIMessage may have this attribute
-        content = message.content
-        return len(tokenizer.encode(role)) + len(tokenizer.encode(str(content)))
-    elif isinstance(message, str):
-        # Handle raw strings (fallback)
-        return len(tokenizer.encode(message))
-    else:
-        raise TypeError(f"Unexpected message type: {type(message)}")
+    # 1. Add message to history with a unique identifier
+    message_id = str(uuid.uuid4())
+    new_message = {
+        "id": message_id,
+        "role": "user",
+        "content": current_input,
+        "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    # 2. Deduplicate messages before adding
+    existing_messages = state['messages']
+    is_duplicate = any(
+        msg.get('content') == current_input and 
+        msg.get('role') == 'user'
+        for msg in existing_messages[-3:] # Check last 3 messages
+    )
+    
+    if not is_duplicate:
+        state['messages'].append(new_message)
+        
+        # 3. Get AI response
+        response = None
+        if state['current_image'] and (
+            'last_image_used' not in state or 
+            state['last_image_used'] != state['current_image']
+        ):
+            response = stream_messages(
+                state['graph'],
+                text=current_input,
+                thread=thread_config,
+                image_path=state['current_image']
+            )
+            state['last_image_used'] = state['current_image']
+        else:
+            response = stream_messages(
+                state['graph'],
+                text=current_input,
+                thread=thread_config
+            )
+            
+        # 4. Process and deduplicate response
+        if response:
+            content = extract_response_content(response)
+            if content:
+                # Check for duplicate responses
+                is_duplicate_response = any(
+                    msg.get('content') == content and 
+                    msg.get('role') == 'assistant'
+                    for msg in existing_messages[-3:]
+                )
+                
+                if not is_duplicate_response:
+                    state['messages'].append({
+                        "id": str(uuid.uuid4()),
+                        "role": "assistant",
+                        "content": content,
+                        "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
+                    })
+        
+        return True
+    return False
 
-def calculate_messages_tokens(messages):
-    """
-    Calculate the total tokens for a list of messages.
-    """
-    return sum(calculate_message_tokens(msg) for msg in messages)
+def extract_response_content(response):
+    """Extract content from the response object"""
+    if isinstance(response, dict):
+        # Check for moderator response first
+        if 'moderator' in response:
+            return response['moderator'].get('moderator_response', '')
+        # Check for messages from different agents
+        elif 'messages' in response:
+            messages = response['messages']
+            if messages and len(messages) > 0:
+                return messages[0].content
+        # Check for specific agent responses
+        else:
+            for node_key in ['visual_artist', 'critic', 'storyteller', 'silly']:
+                if node_key in response and 'messages' in response[node_key]:
+                    messages = response[node_key]['messages']
+                    if messages and len(messages) > 0:
+                        return messages[0].content
+    return None
 
-def trim_messages_to_fit(messages, max_tokens):
-    """
-    Trim a list of LangChain message objects to fit within a maximum token limit.
-    """
-    # Trim messages by removing the oldest (first) until under the token limit
-    trimmed_messages = messages[:]
-    
-    # Trim messages until the token count is within the limit
-    while calculate_messages_tokens(trimmed_messages) > max_tokens:
-        trimmed_messages.pop(0)  # Remove the oldest message
-    
-    return trimmed_messages
-    
+
+def cleanup_duplicate_messages(messages):
+    """Remove duplicate messages while preserving order"""
+    seen = set()
+    cleaned = []
+    for msg in messages:
+        msg_key = (msg.get('role'), msg.get('content'))
+        if msg_key not in seen:
+            seen.add(msg_key)
+            cleaned.append(msg)
+    return cleaned
+

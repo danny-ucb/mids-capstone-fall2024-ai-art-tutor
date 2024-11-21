@@ -26,7 +26,7 @@ from app_pages.login_registration_page import *
 from app_pages.beta_feedback import * 
 
 timezone = pytz.timezone("America/New_York")
-
+     
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -56,17 +56,21 @@ else:
     # Initialize hide_safety_message in session state if it doesn't exist
     if 'hide_safety_message' not in st.session_state:
         st.session_state['hide_safety_message'] = False
+
     
-    # page = st.sidebar.selectbox("Select a page", ["Home", "Parental Controls"])
     main_page, parental_controls, beta_feedback = st.tabs(["Home", "Parental Controls", "Beta Testing Feedback"])
     
     if 'graph' not in st.session_state:
         st.session_state['graph'] = create_nodes(openai_key)
 
+    if 'thread_counter' not in st.session_state:
+        st.session_state['thread_counter'] = 0
+
+
             # Load current consent settings
     consent_data = load_user_consent(st.session_state["username"])
     
-    # Initialize consent settings in session state if not exists
+#     # Initialize consent settings in session state if not exists
     if 'consent_settings' not in st.session_state:
         st.session_state.consent_settings = {
             "memory_collection": consent_data["memory_collection"],
@@ -104,6 +108,7 @@ else:
             with col2:
                 if st.button("✕", help="Hide message"):
                     st.session_state['hide_safety_message'] = True
+                    # persist_username()
                     st.rerun()
         
         st.subheader(f"Let's Draw {st.session_state["username"]}!")
@@ -116,12 +121,12 @@ else:
         
         Just tell me what sounds fun to you! Remember, every great artist started just like you - with imagination and curiosity! 🌟
         """)
-
         
         # Initialize session state variables for chat
         if 'messages' not in st.session_state:
             st.session_state['messages'] = []
-        
+        if 'relevant_messages' not in st.session_state:
+            st.session_state['relevant_messages'] = []
         if 'current_image' not in st.session_state:
             st.session_state['current_image'] = None
         if 'chat_active' not in st.session_state:
@@ -145,11 +150,8 @@ else:
         # Start Chat button
         if not st.session_state['chat_active']:
             if st.button("💬 Start Chat!"):
-                current_username = st.session_state.get("username", None)
                 st.session_state['chat_active'] = True
-                if current_username:
-                    st.session_state["username"] = current_username
-                st.experimental_rerun()    
+                st.experimental_rerun()             
                 
         # Chat interface
         if st.session_state['chat_active']:
@@ -197,30 +199,24 @@ else:
 
                 def handle_submit():
                     if st.session_state[current_key]:
-                        # Store username before submission
-                        current_username = st.session_state.get("username")
-                        
+                        # persist_username()
                         st.session_state.submit_pressed = True
                         st.session_state.temp_input = st.session_state[current_key]
                         
-                        # Restore username
-                        if current_username:
-                            st.session_state["username"] = current_username
-                        
                 user_input = st.text_input(
                     "Type your message here:",
-                    key=current_key,
-                    on_change=handle_submit
+                    key=current_key, 
+                    on_change = handle_submit
                 )
                
                 col1, col2, col3 = st.columns([1, 1, 1])
-                col = st.columns([1]) 
-                # Clear chat button
+
                 with col1:
                     clear_pressed = st.button("Clear Chat")
                     
                 with col2:
                     end_session_pressed = st.button("End Session")
+
 
                 # Download button
                 with col3:
@@ -238,52 +234,68 @@ else:
                         )
             
                 # Process input when either Enter is pressed or Send button is clicked
-                if st.session_state.submit_pressed and st.session_state.temp_input:
+                if (st.session_state.submit_pressed and st.session_state.temp_input):
+                        
                     current_input = st.session_state.temp_input
-                    
+              
                     # Reset states
                     st.session_state.submit_pressed = False
                     st.session_state.temp_input = ""
                     st.session_state.input_key += 1
 
+
                     
                     # Add user message to history
-                    st.session_state['messages'].append({
-                        "role": "user",
-                        "content": current_input, 
-                        "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
-                    })
-
-
-                    # Get AI response
-                    thread_config = {"configurable": {"username": st.session_state['username'], 
-                                                      "thread_id": "1", 
-                                                     "consent_settings": st.session_state.consent_settings}}
+                    existing_messages = st.session_state["messages"]
+                    is_duplicate = any(
+                        msg.get('content') == current_input and 
+                        msg.get('role') == 'user'
+                        for msg in existing_messages[-3:] # Check last 3 messages                    
+                    )
+                    if not is_duplicate:      
+                        st.session_state['messages'].append({
+                            "role": "user",
+                            "content": current_input, 
+                            "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
+                        })
+    
+    
+                        # Get AI response
+                        thread_config = {"configurable": {"username": st.session_state['username'], 
+                                                          "thread_id": "1", 
+                                                         "consent_settings": st.session_state.consent_settings}}
+    
+                        
+                        
+                        # try:
+                        response = None
                     
-                    # try:
-                    response = None
-                    
-                    if st.session_state['current_image'] and (
-                        'last_image_used' not in st.session_state or 
-                        st.session_state['last_image_used'] != st.session_state['current_image']
-                    ):
+                        if st.session_state['current_image'] and (
+                            'last_image_used' not in st.session_state or 
+                            st.session_state['last_image_used'] != st.session_state['current_image']
+                        ):
 
-                        response = stream_messages(
-                            st.session_state['graph'],
-                            text=current_input,
-                            thread=thread_config,
-                            image_path=st.session_state['current_image']
-                        )
-                        # Mark this image as used
-                        st.session_state['last_image_used'] = st.session_state['current_image']
-                    
-                    else:
+                            response = stream_messages(
+                                st.session_state['graph'],
+                                text=current_input,
+                                thread=thread_config,
+                                image_path=st.session_state['current_image']
+                            )
+                            st.session_state["relevant_messages"] = response
+                            # Mark this image as used
+                            st.session_state['last_image_used'] = st.session_state['current_image']
+                        
+                        else:
+    
+                            response = stream_messages(
+                                st.session_state['graph'],
+                                text=current_input,
+                                thread=thread_config
+                            )
+                            st.session_state["relevant_messages"] = response
 
-                        response = stream_messages(
-                            st.session_state['graph'],
-                            text=current_input,
-                            thread=thread_config
-                        )
+
+                    
                     
                     # Extract the message content
                     if response:
@@ -307,35 +319,47 @@ else:
                                             break
                         
                         if content:
-                            st.session_state['messages'].append({
-                                "role": "assistant",
-                                "content": content, 
-                                "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
-                            })
+                            is_duplicate_response = any(
+                                msg.get('content') == content and 
+                                msg.get('role') == 'assistant'
+                                for msg in st.session_state['messages'][-3:]
+                            
+                            )
+                            if not is_duplicate_response:
+                                st.session_state['messages'].append({
+                                    "role": "assistant",
+                                    "content": content, 
+                                    "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
+                                })
                             
                     # Initialize next key before rerun
+                    st.session_state['thread_counter'] += 1
                     next_key = f"user_input_{st.session_state.input_key}"
                     if next_key not in st.session_state:
                         st.session_state[next_key] = ""
                     st.experimental_rerun()
+
                         
                     # except Exception as e:
                     #     st.error(f"An error occurred: {str(e)}")
                 
                 if clear_pressed:
                     st.session_state['messages'] = []
+                    st.session_state['graph'] = create_nodes(openai_key)
                     st.experimental_rerun()
+                    # persist_username()
+
 
                 if end_session_pressed:
                     save_session_summary()
                     cleanup_temp_files()  
                     st.session_state['messages'] = []
+                    st.session_state['graph'] = create_nodes(openai_key)
                     st.experimental_rerun()
+                    persist_username()
                     
 
     with parental_controls:
-        
-        # Call the function to display the parental controls page
         parental_controls_page()
 
     with beta_feedback:
