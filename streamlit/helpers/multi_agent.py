@@ -73,50 +73,6 @@ class AgentState(TypedDict):
     is_appropriate: bool
     moderator_response: str
 
-# class AgentState(TypedDict):
-#     messages: Annotated[Sequence[BaseMessage], operator.add]
-#     recall_memories: Annotated[Sequence[str], operator.add]
-#     next: str
-#     is_appropriate: bool
-#     moderator_response: str
-    
-#     def __init__(self, messages=None, recall_memories=None, next="", is_appropriate=True, moderator_response=""):
-#         super().__init__()
-#         self._full_messages = messages or []
-#         self['messages'] = messages or []
-#         self['recall_memories'] = recall_memories or []
-#         self['next'] = next
-#         self['is_appropriate'] = is_appropriate
-#         self['moderator_response'] = moderator_response
-
-#     @property
-#     def messages(self) -> List[BaseMessage]:
-#         """Get the last 5 messages for processing."""
-#         return self['messages'][-5:] if self['messages'] else []
-
-#     @messages.setter
-#     def messages(self, new_messages: List[BaseMessage]):
-#         """Append new messages while maintaining the full history."""
-#         if not isinstance(self['messages'], list):
-#             self['messages'] = []
-#         self['messages'].extend(new_messages)
-
-#     @property
-#     def full_messages(self) -> List[BaseMessage]:
-#         """Get all messages (full conversation)."""
-#         return self['messages']
-
-#     def to_dict(self) -> dict:
-#         """Convert to dictionary representation."""
-#         return {
-#             'messages': self['messages'],
-#             'recall_memories': self['recall_memories'],
-#             'next': self['next'],
-#             'is_appropriate': self['is_appropriate'],
-#             'moderator_response': self['moderator_response']
-#         }
-
-
 def create_agent(openai_key: str, 
                  llm: ChatOpenAI,  
                  tools: list, 
@@ -127,8 +83,8 @@ def create_agent(openai_key: str,
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
-            MessagesPlaceholder(variable_name="messages"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
+            MessagesPlaceholder(variable_name="messages", n_messages = 4),
+            MessagesPlaceholder(variable_name="agent_scratchpad", n_messages = 4),
         ]
     )
 
@@ -151,7 +107,7 @@ def create_agent(openai_key: str,
 def agent_node(state, agent, name):
     """Process messages with the agent."""
 
-    recent_messages = state["messages"]
+    recent_messages = state["messages"][-5:]
     relevant_memories = state["recall_memories"]
     
     recall_str = (
@@ -175,11 +131,10 @@ def agent_node(state, agent, name):
     # try:
     result = agent.invoke({"messages": recent_messages})
     return result
-
-
-
+ 
 # function for load_memories
 tokenizer = tiktoken.encoding_for_model("gpt-4o-mini")
+
 
 def load_memories(state: AgentState, config: RunnableConfig) -> AgentState:
     """Load memories for the current conversation.
@@ -191,20 +146,26 @@ def load_memories(state: AgentState, config: RunnableConfig) -> AgentState:
     Returns:
         State: The updated state with loaded memories.
     """
-    consent_settings = config["configurable"].get("consent_settings", {})
+    # Check if config and configurable exist
+    if not config or not isinstance(config, dict) or 'configurable' not in config:
+        return {
+            "recall_memories": [],
+        }
+    
+    consent_settings = config.get("configurable", {}).get("consent_settings", {})
     
     # Check if memory collection is allowed
     if not consent_settings.get("memory_collection", False):
         return {
             "recall_memories": [],
         }    
+
     convo_str = get_buffer_string(state["messages"])
     convo_str = tokenizer.decode(tokenizer.encode(convo_str)[:2048])
     recall_memories = search_recall_memories.invoke(convo_str, config)
     return {
         "recall_memories": recall_memories,
     }
-
 
 def route_tools(state: AgentState):
     """Determine whether to use tools or end the conversation based on the last message.
@@ -568,15 +529,6 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
         })
-    # if image_path:
-    #     img_hosted_path = upload_image_and_get_url(image_path, st.session_state["username"])
-    #     st.write(img_hosted_path)
-    #     # base64_image = encode_image(image_path)
-    #     content.append({
-    #         "type": "image_url",
-    #         "image_url": {"url": img_hosted_path}
-    #     })
-
     
 
     # Define the input for the graph stream
