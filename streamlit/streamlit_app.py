@@ -83,6 +83,8 @@ else:
 
         # App title and description
         st.title("🎨 AI ArtBuddy")
+        # st.write(st.session_state)
+        # st.write(st.session_state["consent_settings"]["memory_collection"])
         # Safety message with hide button
         if not st.session_state['hide_safety_message']:
             col1, col2 = st.columns([20, 1])
@@ -124,9 +126,10 @@ else:
         Just tell me what sounds fun to you! You can ask me to generate example images to help you practice, or show me your own drawings for friendly feedback. Remember, every great artist started just like you - with imagination and curiosity! 🌟
         
         Try saying things like:
-        - "Can you show me how to draw a friendly dragon?"
+        - "Can you help me improve my drawing?"
         - "Generate an example of a magical forest I can practice drawing"
-        - "Help me learn to draw cartoon animals"
+        - "Can you show me how to draw a friendly dragon?"
+        - "What are the steps to draw a cartoon animal?"
         """)
         
         # Initialize session state variables for chat
@@ -242,6 +245,7 @@ else:
             
                 # Process input when either Enter is pressed or Send button is clicked
                 if (st.session_state.submit_pressed and st.session_state.temp_input):
+                    # try:
                         
                     current_input = st.session_state.temp_input
               
@@ -273,7 +277,6 @@ else:
     
                         
                         
-                        # try:
                         response = None
                     
                         if st.session_state['current_image'] and (
@@ -338,7 +341,8 @@ else:
                                     "content": content, 
                                     "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
                                 })
-                            
+
+                        
                     # Initialize next key before rerun
                     st.session_state['thread_counter'] += 1
                     next_key = f"user_input_{st.session_state.input_key}"
@@ -346,9 +350,14 @@ else:
                         st.session_state[next_key] = ""
                     st.experimental_rerun()
 
-                        
                     # except Exception as e:
-                    #     st.error(f"An error occurred: {str(e)}")
+                    #     error_msg = str(e)
+                        # if "array too long" in error_msg.lower() or "context length" in error_msg.lower():
+                        #     st.error("You've reached the conversation limit for our beta testing. Please click 'Clear Chat' or 'End Session' to restart the conversation.")
+                        # else:
+                        #     st.error(f"An error occurred: {error_msg}")
+                        # st.error(f"An error occurred: {str(e)}")                        
+
                 
                 if clear_pressed:
                     st.session_state['messages'] = []
