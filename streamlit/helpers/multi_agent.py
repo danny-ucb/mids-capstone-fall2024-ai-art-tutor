@@ -73,50 +73,6 @@ class AgentState(TypedDict):
     is_appropriate: bool
     moderator_response: str
 
-# class AgentState(TypedDict):
-#     messages: Annotated[Sequence[BaseMessage], operator.add]
-#     recall_memories: Annotated[Sequence[str], operator.add]
-#     next: str
-#     is_appropriate: bool
-#     moderator_response: str
-    
-#     def __init__(self, messages=None, recall_memories=None, next="", is_appropriate=True, moderator_response=""):
-#         super().__init__()
-#         self._full_messages = messages or []
-#         self['messages'] = messages or []
-#         self['recall_memories'] = recall_memories or []
-#         self['next'] = next
-#         self['is_appropriate'] = is_appropriate
-#         self['moderator_response'] = moderator_response
-
-#     @property
-#     def messages(self) -> List[BaseMessage]:
-#         """Get the last 5 messages for processing."""
-#         return self['messages'][-5:] if self['messages'] else []
-
-#     @messages.setter
-#     def messages(self, new_messages: List[BaseMessage]):
-#         """Append new messages while maintaining the full history."""
-#         if not isinstance(self['messages'], list):
-#             self['messages'] = []
-#         self['messages'].extend(new_messages)
-
-#     @property
-#     def full_messages(self) -> List[BaseMessage]:
-#         """Get all messages (full conversation)."""
-#         return self['messages']
-
-#     def to_dict(self) -> dict:
-#         """Convert to dictionary representation."""
-#         return {
-#             'messages': self['messages'],
-#             'recall_memories': self['recall_memories'],
-#             'next': self['next'],
-#             'is_appropriate': self['is_appropriate'],
-#             'moderator_response': self['moderator_response']
-#         }
-
-
 def create_agent(openai_key: str, 
                  llm: ChatOpenAI,  
                  tools: list, 
@@ -127,8 +83,8 @@ def create_agent(openai_key: str,
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
-            MessagesPlaceholder(variable_name="messages"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
+            MessagesPlaceholder(variable_name="messages", n_messages = 5),
+            MessagesPlaceholder(variable_name="agent_scratchpad", n_messages = 5),
         ]
     )
 
@@ -151,7 +107,8 @@ def create_agent(openai_key: str,
 def agent_node(state, agent, name):
     """Process messages with the agent."""
 
-    recent_messages = state["messages"]
+    # recent_messages = state["messages"][-5:]
+    recent_messages = truncate_messages(state["messages"], max_tokens = 2048)
     relevant_memories = state["recall_memories"]
     
     recall_str = (
@@ -175,11 +132,10 @@ def agent_node(state, agent, name):
     # try:
     result = agent.invoke({"messages": recent_messages})
     return result
-
-
-
+ 
 # function for load_memories
 tokenizer = tiktoken.encoding_for_model("gpt-4o-mini")
+
 
 def load_memories(state: AgentState, config: RunnableConfig) -> AgentState:
     """Load memories for the current conversation.
@@ -191,20 +147,28 @@ def load_memories(state: AgentState, config: RunnableConfig) -> AgentState:
     Returns:
         State: The updated state with loaded memories.
     """
-    consent_settings = config["configurable"].get("consent_settings", {})
+    # Check if config and configurable exist
+    if not config or not isinstance(config, dict) or 'configurable' not in config:
+        return {
+            "recall_memories": [],
+        }
+        
+    if "consent_settings" in st.session_state:
+        mem_collection = st.session_state["consent_settings"]["memory_collection"]
+    else:
+        mem_collection = False
     
-    # Check if memory collection is allowed
-    if not consent_settings.get("memory_collection", False):
+    if not mem_collection:
         return {
             "recall_memories": [],
         }    
+
     convo_str = get_buffer_string(state["messages"])
     convo_str = tokenizer.decode(tokenizer.encode(convo_str)[:2048])
     recall_memories = search_recall_memories.invoke(convo_str, config)
     return {
         "recall_memories": recall_memories,
     }
-
 
 def route_tools(state: AgentState):
     """Determine whether to use tools or end the conversation based on the last message.
@@ -268,10 +232,14 @@ def save_recall_memory(memory: str, config: RunnableConfig) -> str:
     """Save memory to vectorstore for later semantic retrieval."""
     # username = get_username(config)
     username = st.session_state["username"]
-    consent_settings = config["configurable"].get("consent_settings", {})
+    
+    if "consent_settings" in st.session_state:
+        mem_collection = st.session_state["consent_settings"]["memory_collection"]
+    else:
+        mem_collection = False
     
     # Check if memory collection is allowed
-    if not consent_settings.get("memory_collection", False):
+    if not mem_collection:
         return memory
     
     collection = get_vector_store()
@@ -287,9 +255,8 @@ def save_recall_memory(memory: str, config: RunnableConfig) -> str:
 @tool
 def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
     """Search for relevant memories."""
-    # username = get_username(config)
     username = st.session_state["username"]
-    consent_settings = config["configurable"].get("consent_settings", {})
+
     
     collection = get_vector_store()
     
@@ -331,7 +298,8 @@ def create_nodes(openai_key):
         "Help me visualize the ideas",
         "Can you show me what it looks like?",
         "Can you draw a picture of it?",
-        "Draw me a picture of the story"
+        "Draw me a picture of the story", 
+        "Can you show me an example?"
     ]
     )
     
@@ -568,15 +536,6 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
         })
-    # if image_path:
-    #     img_hosted_path = upload_image_and_get_url(image_path, st.session_state["username"])
-    #     st.write(img_hosted_path)
-    #     # base64_image = encode_image(image_path)
-    #     content.append({
-    #         "type": "image_url",
-    #         "image_url": {"url": img_hosted_path}
-    #     })
-
     
 
     # Define the input for the graph stream
@@ -628,3 +587,74 @@ def cleanup_duplicate_messages(messages):
             seen.add(msg_key)
             cleaned.append(msg)
     return cleaned
+
+from langchain_core.messages import BaseMessage, HumanMessage
+import tiktoken
+from typing import List, Union
+
+def truncate_messages(messages: List[BaseMessage], max_tokens: int = 2048) -> List[BaseMessage]:
+    """
+    Truncate messages to stay within token limits while preserving context.
+    Handles both string and list-based message content formats.
+    
+    Args:
+        messages: List of BaseMessage objects (including HumanMessage)
+        max_tokens: Maximum number of tokens allowed (default 2048)
+        
+    Returns:
+        List[BaseMessage]: Truncated list of messages
+    """
+    if not messages:
+        return []
+
+    tokenizer = tiktoken.encoding_for_model("gpt-4o-mini")
+    
+    def count_tokens(content: Union[str, list]) -> int:
+        """Helper function to count tokens in different content formats"""
+        if isinstance(content, str):
+            return len(tokenizer.encode(content))
+        elif isinstance(content, list):
+            # For multi-modal content, only count tokens in text items
+            total_tokens = 0
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    total_tokens += len(tokenizer.encode(item.get("text", "")))
+            return total_tokens
+        return 0
+    
+    def get_content_text(content: Union[str, list]) -> str:
+        """Helper function to extract text content for the new message"""
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list):
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text":
+                        text_parts.append(item.get("text", ""))
+                    elif item.get("type") == "image_url":
+                        text_parts.append("[Image]")
+            return "\n".join(text_parts)
+        return ""
+
+    # Always keep the first message for context
+    initial_message = messages[0]
+    current_tokens = count_tokens(initial_message.content)
+
+    # Start from the most recent messages and work backward
+    recent_messages = []
+    for msg in reversed(messages[1:]):  # Skip the first message
+        msg_tokens = count_tokens(msg.content)
+        
+        if current_tokens + msg_tokens < max_tokens:
+            if isinstance(msg, HumanMessage):
+                # Preserve the original content structure for HumanMessages
+                recent_messages.insert(0, msg)
+            else:
+                # For other message types, create new message with the same type
+                recent_messages.insert(0, msg.__class__(content=get_content_text(msg.content)))
+            current_tokens += msg_tokens
+        else:
+            break
+    
+    return [initial_message] + recent_messages
