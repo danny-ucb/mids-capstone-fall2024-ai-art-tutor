@@ -320,11 +320,11 @@ def send_verification_email(sender, recipient, subject, verification_code, body_
 
 def intro_page():
     inject_custom_css()
-    st.title("Welcome to AI Art Buddy!🎨")
+    st.title("Welcome to AIArtBuddy!🎨")
 
     
     st.write("""
-        **AI Art Buddy** is a unique art tutoring application designed specifically for children ages 8-10.
+        **AIArtBuddy** is a unique art tutoring application designed specifically for children ages 8-10.
         Our app offers personalized feedback and guidance to help young artists explore their creativity.
     """)
 

@@ -82,7 +82,7 @@ else:
     with main_page:
 
         # App title and description
-        st.title("🎨 AI ArtBuddy")
+        st.title("🎨 AIArtBuddy")
         # st.write(st.session_state)
         # st.write(st.session_state["consent_settings"]["memory_collection"])
         # Safety message with hide button
@@ -131,7 +131,9 @@ else:
         - "Can you show me how to draw a friendly dragon?"
         - "What are the steps to draw a cartoon animal?"
         """)
-        
+        # Add a visual separator here
+        st.markdown("---")  # This creates a horizontal line
+        st.markdown("<br>", unsafe_allow_html=True)  # This adds some spacing
         # Initialize session state variables for chat
         if 'messages' not in st.session_state:
             st.session_state['messages'] = []
@@ -178,14 +180,15 @@ else:
                         # Display the message
                         if role == 'user':
                             st.write(f'👤 **You:** {content}')
-                        elif role == 'assistant':   
+                        elif role == 'assistant':    
                             if content.startswith("https"):
                                 img_file_path = f"produced_images/AI_generated_image_{generate_random_string(10)}.png"
                                 download_image_requests(url=content, file_name=img_file_path)
-                                st.write(f'🎨 **ArtBuddy:** Here\'s what I drew for you:')
-                                st.image(img_file_path, width = 200) 
+                                st.write(f'🎨 **AIArtBuddy:** Here\'s what I drew for you:')
+                                st.image(img_file_path, width = 300) 
                             else:
-                                st.write(f'🎨 **ArtBuddy:** {content}')
+                                if len(content) > 0: 
+                                    st.write(f'🎨 **AIArtBuddy:** {content}')
 
             
             # Create a spacer
@@ -232,7 +235,7 @@ else:
                 with col3:
                     if st.session_state['messages']:
                         chat_text = "\n".join([
-                            f"{'You' if msg.get('role') == 'user' else 'ArtBuddy'}: {msg.get('content', '')}"
+                            f"{'You' if msg.get('role') == 'user' else 'AIArtBuddy'}: {msg.get('content', '')}"
                             for msg in st.session_state['messages']
                             if isinstance(msg, dict)
                         ])
@@ -242,121 +245,98 @@ else:
                             file_name="art_buddy_chat.txt",
                             mime="text/plain"
                         )
-            
-                # Process input when either Enter is pressed or Send button is clicked
-                if (st.session_state.submit_pressed and st.session_state.temp_input):
-                    # try:
+
+                if (st.session_state.submit_pressed and st.session_state.temp_input):                    
+                    try:
+                        current_input = st.session_state.temp_input
                         
-                    current_input = st.session_state.temp_input
-              
-                    # Reset states
-                    st.session_state.submit_pressed = False
-                    st.session_state.temp_input = ""
-                    st.session_state.input_key += 1
-
-
-                    
-                    # Add user message to history
-                    existing_messages = st.session_state["messages"]
-                    is_duplicate = any(
-                        msg.get('content') == current_input and 
-                        msg.get('role') == 'user'
-                        for msg in existing_messages[-3:] # Check last 3 messages                    
-                    )
-                    if not is_duplicate:      
-                        st.session_state['messages'].append({
-                            "role": "user",
-                            "content": current_input, 
-                            "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
-                        })
+                        # Reset states
+                        st.session_state.submit_pressed = False
+                        st.session_state.temp_input = ""
+                        st.session_state.input_key += 1
+                
+                        # Add user message to history
+                        existing_messages = st.session_state["messages"]
+                        is_duplicate = any(
+                            msg.get('content') == current_input and 
+                            msg.get('role') == 'user'
+                            for msg in existing_messages[-3:]                    
+                        )
+                        
+                        if not is_duplicate:      
+                            st.session_state['messages'].append({
+                                "role": "user",
+                                "content": current_input, 
+                                "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                
+                            # Get AI response
+                            thread_config = {
+                                "configurable": {
+                                    "username": st.session_state['username'], 
+                                    "thread_id": "1", 
+                                    "consent_settings": st.session_state.consent_settings
+                                }
+                            }
+                            response = None
+                        
+                            if st.session_state['current_image'] and (
+                                'last_image_used' not in st.session_state or 
+                                st.session_state['last_image_used'] != st.session_state['current_image']
+                            ):
     
-                        # Get AI response
-                        thread_config = {"configurable": {"username": st.session_state['username'], 
-                                                          "thread_id": "1", 
-                                                         "consent_settings": st.session_state.consent_settings}}
-    
-                        
-                        
-                        response = None
-                    
-                        if st.session_state['current_image'] and (
-                            'last_image_used' not in st.session_state or 
-                            st.session_state['last_image_used'] != st.session_state['current_image']
-                        ):
-
-                            response = stream_messages(
-                                st.session_state['graph'],
-                                text=current_input,
-                                thread=thread_config,
-                                image_path=st.session_state['current_image']
-                            )
-                            st.session_state["relevant_messages"] = response
-                            # Mark this image as used
-                            st.session_state['last_image_used'] = st.session_state['current_image']
-                        
-                        else:
-    
-                            response = stream_messages(
-                                st.session_state['graph'],
-                                text=current_input,
-                                thread=thread_config
-                            )
-                            st.session_state["relevant_messages"] = response
-
-
-                    
-                    
-                    # Extract the message content
-                    if response:
-                        content = None
-                        if isinstance(response, dict):
-                            # Check for moderator response first
-                            if 'moderator' in response:
-                                content = response['moderator'].get('moderator_response', '')
-                            # Check for messages from different agents
-                            elif 'messages' in response:
-                                messages = response['messages']
-                                if messages and len(messages) > 0:
-                                    content = messages[0].content
-                            # Check for specific agent responses
+                                response = stream_messages(
+                                    st.session_state['graph'],
+                                    text=current_input,
+                                    thread=thread_config,
+                                    image_path=st.session_state['current_image']
+                                )
+                                st.session_state["relevant_messages"] = response
+                                # Mark this image as used
+                                st.session_state['last_image_used'] = st.session_state['current_image']
+                            
                             else:
-                                for node_key in ['visual_artist', 'critic', 'storyteller', 'silly']:
-                                    if node_key in response and 'messages' in response[node_key]:
-                                        messages = response[node_key]['messages']
-                                        if messages and len(messages) > 0:
-                                            content = messages[0].content
-                                            break
-                        
-                        if content:
-                            is_duplicate_response = any(
-                                msg.get('content') == content and 
-                                msg.get('role') == 'assistant'
-                                for msg in st.session_state['messages'][-3:]
-                            
-                            )
-                            
-                            if not is_duplicate_response:
-                                st.session_state['messages'].append({
-                                    "role": "assistant",
-                                    "content": content, 
-                                    "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
-                                })
+        
+                                response = stream_messages(
+                                    st.session_state['graph'],
+                                    text=current_input,
+                                    thread=thread_config
+                                )
+                                st.session_state["relevant_messages"] = response
+                                
+                
+                            # Add all messages to history
+                            if response:
+                                for msg in response:
+                                    is_duplicate_response = any(
+                                        existing_msg.get('content') == msg['content'] and 
+                                        existing_msg.get('role') == msg['role']
+                                        for existing_msg in st.session_state['messages'][-3:]
+                                    )
+                                    
+                                    if not is_duplicate_response:
+                                        st.session_state['messages'].append({
+                                            "role": msg["role"],
+                                            "content": msg["content"],
+                                            "timestamp": datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
+                                        })
+                
+                            # Prepare for next input
+                            st.session_state['thread_counter'] += 1
+                            next_key = f"user_input_{st.session_state.input_key}"
+                            if next_key not in st.session_state:
+                                st.session_state[next_key] = ""
+                                
+                            st.experimental_rerun()
+            
 
-                        
-                    # Initialize next key before rerun
-                    st.session_state['thread_counter'] += 1
-                    next_key = f"user_input_{st.session_state.input_key}"
-                    if next_key not in st.session_state:
-                        st.session_state[next_key] = ""
-                    st.experimental_rerun()
-
-                    # except Exception as e:
-                    #     error_msg = str(e)
-                        # if "array too long" in error_msg.lower() or "context length" in error_msg.lower():
-                        #     st.error("You've reached the conversation limit for our beta testing. Please click 'Clear Chat' or 'End Session' to restart the conversation.")
-                        # else:
-                        #     st.error(f"An error occurred: {error_msg}")
-                        # st.error(f"An error occurred: {str(e)}")                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "array too long" in error_msg.lower() or "context length" in error_msg.lower():
+                            st.error("You've reached the conversation limit for our beta testing. Please click 'Clear Chat' or 'End Session' to restart the conversation.")
+                        else:
+                            st.error(f"An error occurred: {error_msg}")
+                        st.error(f"An error occurred: {str(e)}")                        
 
                 
                 if clear_pressed:
