@@ -17,7 +17,7 @@ import json
 from helpers.general_helpers import *
 from helpers.memory_utils import *
 from helpers.image_helpers import * 
-from helpers.api_keys import * 
+#from helpers.api_keys import * 
 from helpers.consent_utils import * 
 
 # Third-party imports
@@ -73,65 +73,48 @@ class AgentState(TypedDict):
     is_appropriate: bool
     moderator_response: str
 
-def create_agent(openai_key: str, 
-                 llm: ChatOpenAI,  
-                 tools: list, 
-                 system_prompt: str):
-    """Create an agent using create_openai_tools_agent that's compatible with LangGraph."""
-    
-    # Create the prompt
+def create_agent(openai_key: str, llm: ChatOpenAI, tools: list, system_prompt: str):
+    # Each worker node will be given a name and some tools.
+
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", system_prompt),
-            MessagesPlaceholder(variable_name="messages", n_messages = 5),
-            MessagesPlaceholder(variable_name="agent_scratchpad", n_messages = 5),
+            (
+                "system",
+                system_prompt,
+            ),
+            MessagesPlaceholder(variable_name="messages",n_messages = 5)
         ]
     )
 
-    # Create the agent
-    agent = create_openai_tools_agent(llm, tools, prompt)
-    agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True)
-
-    # Create a chain that processes both the messages and recall_memories
-    chain = (
-        RunnablePassthrough.assign(
-            agent_scratchpad=lambda x: []
-        )
-        | agent_executor
-        | (lambda x: {"messages": [AIMessage(content=x["output"])]})
+    llm_with_tools = llm.bind_tools(tools)
+    agent_chain = (
+        prompt |
+        llm_with_tools
     )
-
-    return chain
+    return agent_chain
 
 
 def agent_node(state, agent, name):
     """Process messages with the agent."""
 
-    # recent_messages = state["messages"][-5:]
-    recent_messages = truncate_messages(state["messages"], max_tokens = 2048)
+    recent_messages = state["messages"]
     relevant_memories = state["recall_memories"]
     
     recall_str = (
         "<recall_memory>\n" + "\n".join(relevant_memories) + "\n</recall_memory>"
     )
     
-    # Add recall memories to the last message if it's from the user
-    if recent_messages and isinstance(recent_messages[-1], HumanMessage):
-        last_msg_content = recent_messages[-1].content
-        if isinstance(last_msg_content, str):
-            recent_messages[-1] = HumanMessage(content=f"{last_msg_content}\n\n{recall_str}")
-        elif isinstance(last_msg_content, list):
-            # Handle multi-modal content
-            text_content = next((item["text"] for item in last_msg_content if item.get("type") == "text"), "")
-            updated_content = [
-                *last_msg_content,
-                {"type": "text", "text": f"\n\n{recall_str}"}
-            ]
-            recent_messages[-1] = HumanMessage(content=updated_content)
-    
-    # try:
-    result = agent.invoke({"messages": recent_messages})
-    return result
+    result = agent.invoke({"messages": recent_messages, "recall_memories": recall_str})
+
+    last_msg = state["messages"][-1]    
+    # remove image url after usage
+    # if last_msg is a list and len>1
+    if isinstance(last_msg.content, list) and len(last_msg.content) > 1:
+        #print(f"Before removal: {state['messages']}")
+        state["messages"][-1] = HumanMessage(last_msg.content[0]["text"])
+        #print("Image removed after usage")
+
+    return {"messages": [result]}
  
 # function for load_memories
 tokenizer = tiktoken.encoding_for_model("gpt-4o-mini")
@@ -162,7 +145,6 @@ def load_memories(state: AgentState, config: RunnableConfig) -> AgentState:
         return {
             "recall_memories": [],
         }    
-
     convo_str = get_buffer_string(state["messages"])
     convo_str = tokenizer.decode(tokenizer.encode(convo_str)[:2048])
     recall_memories = search_recall_memories.invoke(convo_str, config)
@@ -227,6 +209,7 @@ def generate_image(query: str):
     )
     return response.data[0].url
 
+
 @tool
 def save_recall_memory(memory: str, config: RunnableConfig) -> str:
     """Save memory to vectorstore for later semantic retrieval."""
@@ -256,7 +239,6 @@ def save_recall_memory(memory: str, config: RunnableConfig) -> str:
 def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
     """Search for relevant memories."""
     username = st.session_state["username"]
-
     
     collection = get_vector_store()
     
@@ -265,10 +247,19 @@ def search_recall_memories(query: str, config: RunnableConfig) -> List[str]:
         n_results=15,
         where={"username": username}
     )
+    
     if len(query_results["documents"][0]) == 0:
+        print("No memories found")
         return []
-    return [doc[0] for doc in query_results["documents"]]
-
+    
+    all_memories = []
+    for doc_list in query_results["documents"]:
+        all_memories.extend(doc_list)
+    
+    print(f"Found {len(all_memories)} memories")
+    print("First few memories:", all_memories[:3])  # Print first 3 memories for verification
+        
+    return all_memories
 def create_nodes(openai_key):
 
     
@@ -289,6 +280,9 @@ def create_nodes(openai_key):
         "Could you critique the color I used and suggest improvements?",
         "What are relevant art history and theory?",
         "What are some art techniques I can use?",
+        "What's the history of this art style?",
+        "Do you remember my favourite art style and colors?",
+        "My favourite theme is Christmas"
     ]     
     )
 
@@ -318,15 +312,10 @@ def create_nodes(openai_key):
             return "silly"
 
     def router_node(state, name, route_layer=rl):
-        """Router node that determines which agent should handle the request"""
         last_message = state["messages"][-1]
         message_text = last_message.content[0]["text"] if isinstance(last_message.content, list) else last_message.content
         result = semantic_layer(message_text)
-        return {
-            "messages": state["messages"],
-            "recall_memories": state["recall_memories"],
-            "next": result
-        }
+        return {"next": result}
     
 
     memory_usage_prompt = ( "Memory Usage Guidelines:\n"
@@ -402,9 +391,9 @@ def create_nodes(openai_key):
     critic_node = functools.partial(agent_node, agent=critic, name="critic")
     
     # silly agent
-    silly = create_agent(openai_key, llm, [moderator_tool], "You gently redirect the user back to the focus of learning art. \
-        If the child is getting off track, for example, saying silly phrases, repeating words, typing the alphabet, or \
-        talking about something unrelated to art, remind them that you are an art teacher. Talk in one or two sentences.")
+    silly = create_agent(openai_key, llm, [moderator_tool], "You gently redirect the user back to the focus of learning art from unrelated phrases. \
+        Unrelated phrases mainly include 1) meaningless alphabets or phrases 2) completely unrelated to art\
+        Remind them that you are an art teacher. Talk in one or two sentences.")
     
     silly_node = functools.partial(agent_node, agent = silly, name = "silly")
 
@@ -444,6 +433,8 @@ def create_nodes(openai_key):
     "and sensitive topics (e.g., violence, inappropriate language) and be presented in a friendly, encouraging tone. If the content is inappropriate "
     "or too complex, adjust it to be simpler and suitable for children, maintaining the original idea and length. Keep all output to 1-3 sentences maximum"
     "Only invoke once per AI response."
+
+    "However, request to generate image or show examples is totally appropriate, Do not filter for this. "
     )
 
     
@@ -524,19 +515,18 @@ def download_image_requests(url, file_name):
     else:
         pass
 
-
 def stream_messages(graph, text: str, thread: dict, image_path: str = None):
+    """Process messages through the graph with retry for specific error."""
     # Initialize the content with the text message
     content = [{"type": "text", "text": text}]
 
-    # If image_url is provided, append the image content
+    # If image_path is provided, append the image content
     if image_path:
         base64_image = encode_image(image_path)
         content.append({
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
         })
-    
 
     # Define the input for the graph stream
     input_data = {
@@ -545,16 +535,71 @@ def stream_messages(graph, text: str, thread: dict, image_path: str = None):
         ],
     }
 
-
-    # Initialize a variable to store the final output message
-    final_message = ""
-
-    # Stream the graph and capture only the final message output
-    for s in graph.stream(input_data, config=thread):
-        if "__end__" not in s:
-            final_message = s
+    max_retries = 2
+    current_try = 0
     
-    return final_message
+    while current_try < max_retries:
+        try:
+            final_messages = []
+            for s in graph.stream(input_data, config=thread):
+                # st.write(s)
+                print(s)
+            # Handle moderator output
+                if 'moderator' in s:
+                    is_appropriate = s['moderator'].get('is_appropriate', True)
+                    moderator_response = s['moderator'].get('moderator_response', '')
+                    
+                    if not is_appropriate and moderator_response:
+                        final_messages.append({
+                            "role": "assistant",
+                            "content": moderator_response
+                        })
+                        return final_messages  # Return early if content is inappropriate
+                
+                
+                if "__end__" not in s:
+                    # Check for tool messages (like image URLs)
+                    if 'tools' in s and 'messages' in s['tools']:
+                        for msg in s['tools']['messages']:
+                            if hasattr(msg, 'content'):
+                                if isinstance(msg.content, str) and msg.content.startswith('http'):
+                                    final_messages.append({
+                                        "role": "assistant",
+                                        "content": msg.content
+                                    })
+
+                    # Check for agent messages
+                    for agent in ['visual_artist', 'critic', 'storyteller', 'silly', "moderator"]:
+                        if agent in s and 'messages' in s[agent]:
+                            agent_msg = s[agent]['messages'][0]
+                            if hasattr(agent_msg, 'content'):
+                                final_messages.append({
+                                    "role": "assistant",
+                                    "content": agent_msg.content
+                                })
+            
+            return final_messages
+
+        except Exception as e:
+            error_message = str(e)
+            if "Invalid parameter: messages with role 'tool' must be a response" in error_message:
+                current_try += 1
+                print(f"Retrying due to tool message error. Attempt {current_try} of {max_retries}")
+                if current_try == max_retries:
+                    return [{
+                        "role": "assistant",
+                        "content": "I apologize, but I encountered an issue. Could you please try your request again?"
+                    }]
+                continue
+            else:
+                # If it's a different error, raise it immediately
+                raise e
+
+    return [{
+        "role": "assistant",
+        "content": "I apologize, but I encountered an issue. Could you please try your request again?"
+    }]
+
 
 def extract_response_content(response):
     """Extract content from the response object"""
@@ -587,74 +632,3 @@ def cleanup_duplicate_messages(messages):
             seen.add(msg_key)
             cleaned.append(msg)
     return cleaned
-
-from langchain_core.messages import BaseMessage, HumanMessage
-import tiktoken
-from typing import List, Union
-
-def truncate_messages(messages: List[BaseMessage], max_tokens: int = 2048) -> List[BaseMessage]:
-    """
-    Truncate messages to stay within token limits while preserving context.
-    Handles both string and list-based message content formats.
-    
-    Args:
-        messages: List of BaseMessage objects (including HumanMessage)
-        max_tokens: Maximum number of tokens allowed (default 2048)
-        
-    Returns:
-        List[BaseMessage]: Truncated list of messages
-    """
-    if not messages:
-        return []
-
-    tokenizer = tiktoken.encoding_for_model("gpt-4o-mini")
-    
-    def count_tokens(content: Union[str, list]) -> int:
-        """Helper function to count tokens in different content formats"""
-        if isinstance(content, str):
-            return len(tokenizer.encode(content))
-        elif isinstance(content, list):
-            # For multi-modal content, only count tokens in text items
-            total_tokens = 0
-            for item in content:
-                if isinstance(item, dict) and item.get("type") == "text":
-                    total_tokens += len(tokenizer.encode(item.get("text", "")))
-            return total_tokens
-        return 0
-    
-    def get_content_text(content: Union[str, list]) -> str:
-        """Helper function to extract text content for the new message"""
-        if isinstance(content, str):
-            return content
-        elif isinstance(content, list):
-            text_parts = []
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        text_parts.append(item.get("text", ""))
-                    elif item.get("type") == "image_url":
-                        text_parts.append("[Image]")
-            return "\n".join(text_parts)
-        return ""
-
-    # Always keep the first message for context
-    initial_message = messages[0]
-    current_tokens = count_tokens(initial_message.content)
-
-    # Start from the most recent messages and work backward
-    recent_messages = []
-    for msg in reversed(messages[1:]):  # Skip the first message
-        msg_tokens = count_tokens(msg.content)
-        
-        if current_tokens + msg_tokens < max_tokens:
-            if isinstance(msg, HumanMessage):
-                # Preserve the original content structure for HumanMessages
-                recent_messages.insert(0, msg)
-            else:
-                # For other message types, create new message with the same type
-                recent_messages.insert(0, msg.__class__(content=get_content_text(msg.content)))
-            current_tokens += msg_tokens
-        else:
-            break
-    
-    return [initial_message] + recent_messages
