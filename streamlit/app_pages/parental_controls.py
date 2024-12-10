@@ -47,7 +47,7 @@ def parental_controls_page():
         st.subheader("Session Summaries")
         sessions = load_session_data(st.session_state["username"])
         if sessions:
-            for session in sessions:
+            for session in reversed(sessions):
                 st.markdown(
                     f"""
                     <div style="
