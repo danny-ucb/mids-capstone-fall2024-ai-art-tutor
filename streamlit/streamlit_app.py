@@ -184,11 +184,13 @@ else:
                             if content.startswith("https"):
                                 img_file_path = f"produced_images/AI_generated_image_{generate_random_string(10)}.png"
                                 download_image_requests(url=content, file_name=img_file_path)
-                                st.write(f'🎨 **AIArtBuddy:** Here\'s what I drew for you:')
-                                st.image(img_file_path, width = 300) 
+                                # st.write(f'🎨 **AIArtBuddy:** Here\'s what I drew for you:')
+                                # st.image(img_file_path, width = 300) 
                             else:
                                 if len(content) > 0: 
                                     st.write(f'🎨 **AIArtBuddy:** {content}')
+
+            
 
             
             # Create a spacer

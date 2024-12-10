@@ -260,11 +260,3 @@ def upload_image_and_get_url(image_path, username):
         print(f'Error: {e}')
         return None
 
-
-# def download_image_requests(url, file_name):
-#     response = requests.get(url)
-#     if response.status_code == 200:
-#         with open(file_name, 'wb') as file:
-#             file.write(response.content)
-#     else:
-#         pass
